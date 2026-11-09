@@ -1,7 +1,8 @@
 import { useAuth } from '../../context/AuthContext'
-import DirectorDashboard from '../DirectorDashboard'
-import PresidentDashboard from '../PresidentDashboard'
-import ProfessorDashboard from '../ProfessorDashboard'
+
+import DirectorDashboard from '../Director Pages/DirectorDashboard'
+import PresidentDashboard from '../President Pages/PresidentDashboard'
+import ProfessorDashboard from '../Professor Pages/ProfessorDashboard'
 import StudentDashboard from '../Student Pages/StudentDashboard'
 
 function DashboardHome() {
