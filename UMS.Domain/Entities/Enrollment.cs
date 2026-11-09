@@ -17,8 +17,9 @@ namespace UMS.Domain.Entities
         public int? DecidedByUserId { get; set; }
         public DateTime? CompletedAt { get; set; }
 
-        //--Nav--//
 
+
+        //--Nav--//
         public Student Student { get; set; } = null!;
         public Course Course { get; set; } = null!;
     }

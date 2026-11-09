@@ -5,7 +5,7 @@ using System.Text;
 using UMS.Application;
 using UMS.Application.Interfaces;
 using UMS.Domain.Entities;
-using UMS.Infrastructre;
+using UMS.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 

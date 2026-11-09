@@ -2,7 +2,7 @@
 
 #nullable disable
 
-namespace UMS.Infrastructre.Migrations
+namespace UMS.Infrastructure.Migrations
 {
     /// <inheritdoc />
     public partial class InitialCreate : Migration

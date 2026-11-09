@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Text;
 using UMS.Domain.Entities;
 
-namespace UMS.Infrastructre
+namespace UMS.Infrastructure
 {
     public class UMSDbContext : DbContext
     {

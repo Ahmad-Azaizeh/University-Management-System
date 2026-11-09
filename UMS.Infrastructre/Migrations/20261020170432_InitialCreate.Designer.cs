@@ -4,11 +4,11 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using UMS.Infrastructre;
+using UMS.Infrastructure;
 
 #nullable disable
 
-namespace UMS.Infrastructre.Migrations
+namespace UMS.Infrastructure.Migrations
 {
     [DbContext(typeof(UMSDbContext))]
     [Migration("20261020170432_InitialCreate")]

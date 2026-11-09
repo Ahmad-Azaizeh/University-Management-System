@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\UMS.Infrastructre\UMS.Infrastructre.csproj" />
+    <ProjectReference Include="..\UMS.Infrastructre\UMS.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

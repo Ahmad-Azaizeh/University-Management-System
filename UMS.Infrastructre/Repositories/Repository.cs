@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 using UMS.Application.Interfaces;
 
-namespace UMS.Infrastructre.Repositories
+namespace UMS.Infrastructure.Repositories
 {
     public class Repository<T> : IRepository<T> where T : class
     {

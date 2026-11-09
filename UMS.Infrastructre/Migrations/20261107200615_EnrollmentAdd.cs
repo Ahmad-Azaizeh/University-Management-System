@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace UMS.Infrastructre.Migrations
+namespace UMS.Infrastructure.Migrations
 {
     /// <inheritdoc />
     public partial class EnrollmentAdd : Migration

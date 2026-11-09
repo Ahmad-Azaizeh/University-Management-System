@@ -17,7 +17,6 @@ namespace UMS.Domain.Entities
 
         public School School { get; set; } = null!;
         public Professor? Professor { get; set; }
-        public ICollection<Enrollment> Enrollments { get; set; }
-            = new List<Enrollment>();
+        public ICollection<Enrollment> Enrollments { get; set; } = new List<Enrollment>();
     }
 }

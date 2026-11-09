@@ -15,7 +15,6 @@ namespace UMS.Domain.Entities
         //--Nav--//
         public User User { get; set; } = null!;
         public School School { get; set; } = null!;
-
         public ICollection<Enrollment> Enrollments { get; set; } = new List<Enrollment>();
     }
 }

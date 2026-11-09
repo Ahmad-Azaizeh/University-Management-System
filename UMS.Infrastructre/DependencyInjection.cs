@@ -5,10 +5,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using UMS.Application.Interfaces;
-using UMS.Infrastructre.Repositories;
+using UMS.Infrastructure.Repositories;
 
 
-namespace UMS.Infrastructre
+namespace UMS.Infrastructure
 {
     public static class DependencyInjection
     {
