@@ -202,12 +202,6 @@ namespace UMS.Application.Services
                         "You cannot delete students from another school.");
             }
 
-            var enrollments = await _enrollmentRepository.GetAllAsync();
-
-            if (enrollments.Any(e => e.StudentId == id))
-                throw new ArgumentException(
-                    "Cannot delete a student who has enrollments.");
-
             var studentUser = await _userRepository.GetByIdAsync(student.UserId);
 
             if (studentUser == null)

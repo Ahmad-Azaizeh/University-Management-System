@@ -291,10 +291,17 @@ function ProfessorsPage() {
       )
 
       if (!response.ok) {
-        const message = await response.text()
-        throw new Error(
-          message || 'Failed to delete professor.'
-        )
+        const responseText = await response.text()
+        let message = responseText
+
+        try {
+          const data = JSON.parse(responseText)
+          message = data.message || responseText
+        } catch {
+          throw new Error(responseText || 'Failed to delete professor.')
+        }
+
+        throw new Error(message || 'Failed to delete professor.')
       }
 
       setProfessors((previous) =>

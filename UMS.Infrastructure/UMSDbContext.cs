@@ -81,7 +81,7 @@ namespace UMS.Infrastructure
                 .HasOne(e => e.Student)
                 .WithMany(s => s.Enrollments)
                 .HasForeignKey(e => e.StudentId)
-                .OnDelete(DeleteBehavior.NoAction);
+                .OnDelete(DeleteBehavior.Cascade);
 
             // Course - Enrollments (one-to-many)
             modelBuilder.Entity<Enrollment>()
