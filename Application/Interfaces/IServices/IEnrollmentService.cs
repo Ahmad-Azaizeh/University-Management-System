@@ -11,6 +11,7 @@ namespace UMS.Application.Interfaces.Services
         Task<EnrollmentDto?> GetByIdAsync(int id, int currentUserId);
         Task<EnrollmentDto> CreateAsync(CreateEnrollmentDto dto, int currentUserId);
         Task<bool> UpdateAsync(int id, UpdateEnrollmentDto dto, int currentUserId);
+        Task<bool> DeleteAsync(int id, int currentUserId);
 
         Task<IEnumerable<CourseStudentDto>> GetStudentsByCourseAsync(int courseId, int currentUserId);
 

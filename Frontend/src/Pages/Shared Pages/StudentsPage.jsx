@@ -331,7 +331,9 @@ function StudentsPage() {
 
           <tbody>
             {filteredStudents.map((student) => {
-              const enrollments = student.enrollments || []
+              const enrollments = (student.enrollments || []).filter(
+                (enrollment) => [0, 3, 4].includes(Number(enrollment.status))
+              )
 
               return (
                 <Fragment key={student.id}>

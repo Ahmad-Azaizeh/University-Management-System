@@ -57,7 +57,8 @@ namespace UMS.Application.Services
                     CourseId = e.CourseId,
                     CourseName = e.Course.Name,
                     CourseCode = e.Course.Code,
-                    Grade = e.Grade
+                    Grade = e.Grade,
+                    Status = e.Status,
                 }).ToList()
             });
         }

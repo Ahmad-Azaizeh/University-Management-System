@@ -114,6 +114,28 @@ namespace University_Management_System.Controllers
             }
         }
 
+
+        [Authorize(Roles = "President,Director")]
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id)
+        {
+            try
+            {
+                var deleted = await _enrollmentService.DeleteAsync(
+                    id, GetCurrentUserId());
+
+                if (!deleted)
+                    return NotFound();
+
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+        }
+
+
         [Authorize(Roles = "President,Director,Professor")]
         [HttpGet("course/{courseId}/students")]
         public async Task<ActionResult<IEnumerable<CourseStudentDto>>> GetStudentsByCourse(int courseId)

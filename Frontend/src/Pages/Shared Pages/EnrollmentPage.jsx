@@ -206,6 +206,38 @@ function EnrollmentsPage() {
     }
   }
 
+  async function handleDeleteEnrollment(enrollment) {
+  const confirmed = window.confirm(
+    `Are you sure you want to delete ${enrollment.studentName}'s enrollment in ${enrollment.courseName}?`
+  )
+
+  if (!confirmed) return
+
+  try {
+    setActionError('')
+
+    const response = await fetch(
+      `${API}/Enrollments/${enrollment.id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(token),
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(
+        await getErrorMessage(response, 'Failed to delete enrollment.')
+      )
+    }
+
+    setEnrollments((previous) =>
+      previous.filter((e) => e.id !== enrollment.id)
+    )
+  } catch (err) {
+    setActionError(err.message || 'Something went wrong.')
+  }
+}
+
   // Filter enrollments
   const filteredEnrollments = enrollments.filter((enrollment) => {
     const matchesStatus =
@@ -502,29 +534,36 @@ function EnrollmentsPage() {
                     </td>
 
                     <td>
-                      {Number(enrollment.status) === 1 ? (
-                        <div className="enrollment-row-actions">
-                          <button
-                            className="enrollment-approve-button"
-                            onClick={() =>
-                              handleRequestAction(enrollment.id, 'approve')
-                            }
-                          >
-                            Approve
-                          </button>
+                      <div className="enrollment-row-actions">
+                        {Number(enrollment.status) === 1 && (
+                          <>
+                            <button
+                              className="enrollment-approve-button"
+                              onClick={() =>
+                                handleRequestAction(enrollment.id, 'approve')
+                              }
+                            >
+                              Approve
+                            </button>
 
-                          <button
-                            className="enrollment-decline-button"
-                            onClick={() =>
-                              handleRequestAction(enrollment.id, 'decline')
-                            }
-                          >
-                            Decline
-                          </button>
-                        </div>
-                      ) : (
-                        '—'
-                      )}
+                            <button
+                              className="enrollment-decline-button"
+                              onClick={() =>
+                                handleRequestAction(enrollment.id, 'decline')
+                              }
+                            >
+                              Decline
+                            </button>
+                          </>
+                        )}
+
+                        <button
+                          className="enrollment-decline-button"
+                          onClick={() => handleDeleteEnrollment(enrollment)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )

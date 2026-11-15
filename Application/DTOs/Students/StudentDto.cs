@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using UMS.Domain.Enums;
 
 namespace UMS.Application.DTOs.Students
 {
@@ -24,6 +25,7 @@ namespace UMS.Application.DTOs.Students
         public string CourseCode { get; set; } = string.Empty;
         public decimal? Grade { get; set; }
         public DateTime EnrollmentDate { get; set; }
+        public EnrollmentStatus Status { get; set; }
     }
 
 }

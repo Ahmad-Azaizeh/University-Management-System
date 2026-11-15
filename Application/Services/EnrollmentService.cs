@@ -32,25 +32,6 @@ namespace UMS.Application.Services
             _professorRepository = professorRepository;
         }
 
-        
-        private async Task EnsureEnrollmentAccessAsync(
-            Enrollment enrollment, User user)
-        {
-            if (user.Role != UserRole.Director)
-                return;
-
-            var schoolId = await GetDirectorSchoolIdAsync(user.Id);
-            var student = await _studentRepository.GetByIdAsync(enrollment.StudentId);
-            var course = await _courseRepository.GetByIdAsync(enrollment.CourseId);
-
-            if (student == null || course == null ||
-                student.SchoolId != schoolId ||
-                course.SchoolId != schoolId)
-            {
-                throw new UnauthorizedAccessException(
-                    "You cannot access enrollments outside your school.");
-            }
-        }
 
         public async Task<IEnumerable<EnrollmentDto>> GetAllAsync(int currentUserId)
         {
@@ -214,7 +195,7 @@ namespace UMS.Application.Services
                 enrollment.Status != EnrollmentStatus.Failed)
             {
                 throw new ArgumentException(
-                    "Only approved enrollments can receive grades.");
+                    "An enrollment needs to be approved to receive a grade.");
             }
 
             if (dto.Grade < 0 || dto.Grade > 100)
@@ -276,6 +257,24 @@ namespace UMS.Application.Services
         }
 
 
+        public async Task<bool> DeleteAsync(int id, int currentUserId)
+        {
+            var user = await GetAuthorizedUserAsync(currentUserId);
+
+            var enrollment = await _enrollmentRepository.GetByIdAsync(id);
+
+            if (enrollment == null)
+                return false;
+
+            await EnsureEnrollmentAccessAsync(enrollment, user);
+
+            _enrollmentRepository.Delete(enrollment);
+            await _enrollmentRepository.SaveChangesAsync();
+
+            return true;
+        }
+
+
         public async Task<IEnumerable<CourseStudentDto>> GetStudentsByCourseAsync(int courseId, int currentUserId)
         {
             var user = await GetAuthorizedGradeUserAsync(currentUserId);
@@ -290,7 +289,8 @@ namespace UMS.Application.Services
                 var schoolId = await GetDirectorSchoolIdAsync(user.Id);
 
                 if (course.SchoolId != schoolId)
-                    throw new UnauthorizedAccessException();
+                    throw new UnauthorizedAccessException(
+                        "You cannot access courses outside your school.");
             }
             else if (user.Role == UserRole.Professor)
             {
@@ -365,7 +365,7 @@ namespace UMS.Application.Services
                 .Where(e => e.StudentId == student.Id)
                 .ToList();
 
-            // Maximum five Pending or Approved enrollments
+            
             var activeCount = studentEnrollments.Count(e =>
                 e.Status == EnrollmentStatus.Pending ||
                 e.Status == EnrollmentStatus.Approved);
@@ -374,7 +374,7 @@ namespace UMS.Application.Services
                 throw new ArgumentException(
                     "You cannot have more than five active enrollments.");
 
-            // Block duplicate Pending, Approved, or Completed enrollments
+            
             var existingEnrollment = enrollments.FirstOrDefault(e =>
                 e.StudentId == student.Id &&
                 e.CourseId == dto.CourseId &&
@@ -388,7 +388,7 @@ namespace UMS.Application.Services
                     "You already have an active or completed enrollment for this course.");
             }
 
-            // Enforce the three-month cooldown after rejection
+            
             var recentDecline = studentEnrollments
                 .Where(e =>
                     e.CourseId == dto.CourseId &&
@@ -581,6 +581,26 @@ namespace UMS.Application.Services
             }
 
             return user;
+        }
+
+
+        private async Task EnsureEnrollmentAccessAsync(
+            Enrollment enrollment, User user)
+        {
+            if (user.Role != UserRole.Director)
+                return;
+
+            var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+            var student = await _studentRepository.GetByIdAsync(enrollment.StudentId);
+            var course = await _courseRepository.GetByIdAsync(enrollment.CourseId);
+
+            if (student == null || course == null ||
+                student.SchoolId != schoolId ||
+                course.SchoolId != schoolId)
+            {
+                throw new UnauthorizedAccessException(
+                    "You cannot access enrollments outside your school.");
+            }
         }
     }
 }
