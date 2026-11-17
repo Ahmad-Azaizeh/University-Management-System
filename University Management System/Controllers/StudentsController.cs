@@ -1,7 +1,8 @@
 ﻿
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Students;
 using UMS.Application.Interfaces.Services;
 
@@ -24,10 +25,25 @@ namespace University_Management_System.Controllers
 
         [Authorize(Roles = "President,Director")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<StudentDto>>> GetAll()
+        public async Task<IActionResult> GetAll(
+            [FromQuery] bool paginated = true,
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 10)
         {
-            var students = await _studentService.GetAllAsync(GetCurrentUserId());
-            return Ok(students);
+            if (!paginated)
+            {
+                var students = await _studentService.GetAllAsync(
+                    GetCurrentUserId());
+
+                return Ok(students);
+            }
+
+            var pagedStudents = await _studentService.GetAllPagedAsync(
+                GetCurrentUserId(),
+                pageNumber,
+                pageSize);
+
+            return Ok(pagedStudents);
         }
 
 

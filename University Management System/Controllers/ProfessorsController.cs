@@ -20,18 +20,29 @@ namespace University_Management_System.Controllers
             _professorService = professorService;
         }
 
-        
+
 
         [Authorize(Roles = "President,Director")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<ProfessorDto>>> GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] bool paginated = true, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
         {
             try
             {
-                var professors = await _professorService.GetAllAsync(
-                    GetCurrentUserId());
+                if (!paginated)
+                {
+                    var professors = await _professorService.GetAllAsync(
+                        GetCurrentUserId());
 
-                return Ok(professors);
+                    return Ok(professors);
+                }
+
+                var pagedProfessors = await _professorService.GetAllPagedAsync(
+                    GetCurrentUserId(),
+                    pageNumber,
+                    pageSize
+                );
+
+                return Ok(pagedProfessors);
             }
             catch (UnauthorizedAccessException)
             {
@@ -63,8 +74,7 @@ namespace University_Management_System.Controllers
 
         [Authorize(Roles = "President,Director")]
         [HttpPost]
-        public async Task<ActionResult<ProfessorDto>> Create(
-            [FromBody] CreateProfessorDto dto)
+        public async Task<ActionResult<ProfessorDto>> Create([FromBody] CreateProfessorDto dto)
         {
             try
             {

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Enrollments;
 
 namespace UMS.Application.Interfaces.Services
@@ -8,6 +9,7 @@ namespace UMS.Application.Interfaces.Services
     public interface IEnrollmentService
     {
         Task<IEnumerable<EnrollmentDto>> GetAllAsync(int currentUserId);
+        Task<PagedResult<EnrollmentDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize);
         Task<EnrollmentDto?> GetByIdAsync(int id, int currentUserId);
         Task<EnrollmentDto> CreateAsync(CreateEnrollmentDto dto, int currentUserId);
         Task<bool> UpdateAsync(int id, UpdateEnrollmentDto dto, int currentUserId);

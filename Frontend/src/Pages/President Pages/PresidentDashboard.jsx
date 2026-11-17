@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
@@ -6,6 +5,7 @@ const API = 'https://localhost:7245/api'
 
 function PresidentDashboard() {
   const { user } = useAuth()
+  const token = user?.token
 
   const [schools, setSchools] = useState([])
   const [users, setUsers] = useState([])
@@ -18,22 +18,21 @@ function PresidentDashboard() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!token) return
+
     async function loadDashboard() {
       try {
-        setLoading(true)
-        setError('')
-
         const headers = {
-          Authorization: `Bearer ${user.token}`,
+          Authorization: `Bearer ${token}`,
         }
 
         const endpoints = [
           'Schools',
           'Users',
-          'Students',
-          'Professors',
-          'Courses',
-          'Enrollments',
+          'Students?paginated=false',
+          'Professors?paginated=false',
+          'Courses?paginated=false',
+          'Enrollments?paginated=false',
         ]
 
         const responses = await Promise.all(
@@ -63,10 +62,8 @@ function PresidentDashboard() {
       }
     }
 
-    if (user?.token) {
-      loadDashboard()
-    }
-  }, [user])
+    loadDashboard()
+  }, [token])
 
   if (loading) return <p>Loading dashboard...</p>
 

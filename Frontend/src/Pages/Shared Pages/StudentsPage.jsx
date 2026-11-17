@@ -3,6 +3,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const API = 'https://localhost:7245/api'
+const PAGE_SIZE = 10
 
 function StudentsPage() {
   const { user } = useAuth()
@@ -13,7 +14,14 @@ function StudentsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
   const [search, setSearch] = useState('')
+  const [activeSearch, setActiveSearch] = useState('')
+
+  const [pageNumber, setPageNumber] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+
   const [selectedStudentId, setSelectedStudentId] = useState(null)
 
   const [showForm, setShowForm] = useState(false)
@@ -46,7 +54,11 @@ function StudentsPage() {
           Authorization: `Bearer ${user.token}`,
         }
 
-        const studentsResponse = await fetch(`${API}/Students`, {
+        const studentsUrl = activeSearch
+          ? `${API}/Students?paginated=false`
+          : `${API}/Students?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`
+
+        const studentsResponse = await fetch(studentsUrl, {
           headers,
         })
 
@@ -55,7 +67,16 @@ function StudentsPage() {
         }
 
         const studentsData = await studentsResponse.json()
-        setStudents(studentsData)
+
+        if (activeSearch) {
+          setStudents(studentsData)
+          setTotalCount(studentsData.length)
+          setTotalPages(1)
+        } else {
+          setStudents(studentsData.items || [])
+          setTotalCount(studentsData.totalCount || 0)
+          setTotalPages(studentsData.totalPages || 1)
+        }
 
         if (isPresident) {
           const schoolsResponse = await fetch(`${API}/Schools`, {
@@ -77,12 +98,28 @@ function StudentsPage() {
     }
 
     loadData()
-  }, [user?.token, isPresident, refreshKey])
+  }, [
+    user?.token,
+    isPresident,
+    refreshKey,
+    pageNumber,
+    activeSearch,
+  ])
 
   const filteredStudents = students.filter((student) =>
-    (student.fullName || '').toLowerCase().includes(search.toLowerCase()) ||
-    (student.studentNumber || '').toLowerCase().includes(search.toLowerCase())
+    (student.fullName || '')
+      .toLowerCase()
+      .includes(activeSearch.toLowerCase()) ||
+    (student.studentNumber || '')
+      .toLowerCase()
+      .includes(activeSearch.toLowerCase())
   )
+
+  function handleSearch(e) {
+    e.preventDefault()
+    setPageNumber(1)
+    setActiveSearch(search.trim())
+  }
 
   function openCreateForm() {
     setEditingStudent(null)
@@ -191,6 +228,9 @@ function StudentsPage() {
       }
 
       closeForm()
+      setPageNumber(1)
+      setActiveSearch('')
+      setSearch('')
       setRefreshKey((previous) => previous + 1)
     } catch (err) {
       setError(err.message || 'Something went wrong.')
@@ -270,6 +310,16 @@ function StudentsPage() {
     }
   }
 
+  function goToPreviousPage() {
+    setPageNumber((previous) => Math.max(previous - 1, 1))
+  }
+
+  function goToNextPage() {
+    setPageNumber((previous) =>
+      Math.min(previous + 1, totalPages)
+    )
+  }
+
   if (loading) {
     return (
       <section className="dashboard-content">
@@ -292,7 +342,10 @@ function StudentsPage() {
 
         <div className="students-header-actions">
           <span className="students-count">
-            {filteredStudents.length} students
+            {activeSearch
+              ? filteredStudents.length
+              : totalCount}{' '}
+            students
           </span>
 
           <button
@@ -308,13 +361,25 @@ function StudentsPage() {
         <p className="students-error">{error}</p>
       )}
 
-      <input
-        className="students-search"
-        type="text"
-        placeholder="Search by name or student number..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
+      <form
+        className="students-search-form"
+        onSubmit={handleSearch}
+      >
+        <input
+          className="students-search"
+          type="text"
+          placeholder="Search by name or student number..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        <button
+          type="submit"
+          className="students-search-button"
+        >
+          Search
+        </button>
+      </form>
 
       <div className="students-table-wrapper">
         <table className="students-table">
@@ -332,7 +397,8 @@ function StudentsPage() {
           <tbody>
             {filteredStudents.map((student) => {
               const enrollments = (student.enrollments || []).filter(
-                (enrollment) => [0, 3, 4].includes(Number(enrollment.status))
+                (enrollment) =>
+                  [0, 3, 4].includes(Number(enrollment.status))
               )
 
               return (
@@ -342,6 +408,7 @@ function StudentsPage() {
                     <td>{student.studentNumber}</td>
                     <td>{student.schoolName}</td>
                     <td>{enrollments.length}</td>
+
                     <td>
                       <button
                         className="student-details-button"
@@ -426,6 +493,30 @@ function StudentsPage() {
         </table>
       </div>
 
+      {!activeSearch && totalPages > 1 && (
+        <div className="students-pagination">
+          <button
+            className="students-pagination-button"
+            onClick={goToPreviousPage}
+            disabled={pageNumber === 1}
+          >
+            Previous
+          </button>
+
+          <span className="students-page-info">
+            Page {pageNumber} of {totalPages}
+          </span>
+
+          <button
+            className="students-pagination-button"
+            onClick={goToNextPage}
+            disabled={pageNumber === totalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
+
       {showForm && (
         <div className="students-modal-overlay">
           <div className="students-modal">
@@ -464,7 +555,9 @@ function StudentsPage() {
                     required
                   />
 
-                  <label htmlFor="student-password">Initial Password</label>
+                  <label htmlFor="student-password">
+                    Initial Password
+                  </label>
                   <input
                     id="student-password"
                     name="password"
@@ -474,7 +567,9 @@ function StudentsPage() {
                     required
                   />
 
-                  <label htmlFor="student-number">Student Number</label>
+                  <label htmlFor="student-number">
+                    Student Number
+                  </label>
                   <input
                     id="student-number"
                     name="studentNumber"

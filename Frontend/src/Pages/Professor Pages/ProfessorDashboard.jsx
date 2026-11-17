@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -6,6 +5,7 @@ const API = 'https://localhost:7245/api'
 
 function ProfessorDashboard() {
   const { user } = useAuth()
+  const token = user?.token
 
   const [courses, setCourses] = useState([])
   const [courseStudents, setCourseStudents] = useState([])
@@ -13,17 +13,19 @@ function ProfessorDashboard() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!token) return
+
     async function loadDashboard() {
       try {
-        setLoading(true)
-        setError('')
-
         // Load professor's assigned courses
-        const coursesResponse = await fetch(`${API}/Courses`, {
-          headers: {
-            Authorization: `Bearer ${user.token}`,
-          },
-        })
+        const coursesResponse = await fetch(
+          `${API}/Courses?paginated=false`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        )
 
         if (!coursesResponse.ok) {
           throw new Error('Failed to load courses.')
@@ -39,7 +41,7 @@ function ProfessorDashboard() {
               `${API}/Enrollments/course/${course.id}/students`,
               {
                 headers: {
-                  Authorization: `Bearer ${user.token}`,
+                  Authorization: `Bearer ${token}`,
                 },
               }
             )
@@ -65,10 +67,8 @@ function ProfessorDashboard() {
       }
     }
 
-    if (user?.token) {
-      loadDashboard()
-    }
-  }, [user?.token])
+    loadDashboard()
+  }, [token])
 
   if (loading) {
     return <section className="dashboard-content">Loading dashboard...</section>

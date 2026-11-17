@@ -19,32 +19,36 @@ namespace University_Management_System.Controllers
             _enrollmentService = enrollmentService;
         }
 
-        private int GetCurrentUserId()
-        {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            if (!int.TryParse(userId, out var id))
-                throw new UnauthorizedAccessException("Invalid user ID.");
-
-            return id;
-        }
 
         [Authorize(Roles = "President,Director")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<EnrollmentDto>>> GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] bool paginated = true, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
         {
             try
             {
-                var enrollments = await _enrollmentService.GetAllAsync(
-                    GetCurrentUserId());
+                if (!paginated)
+                {
+                    var enrollments = await _enrollmentService.GetAllAsync(GetCurrentUserId());
 
-                return Ok(enrollments);
+                    return Ok(enrollments);
+                }
+
+                var pagedEnrollments = await _enrollmentService.GetAllPagedAsync(
+                    GetCurrentUserId(),
+                    pageNumber,
+                    pageSize
+                );
+
+                return Ok(pagedEnrollments);
             }
             catch (UnauthorizedAccessException)
             {
                 return Forbid();
             }
         }
+
+
 
         [Authorize(Roles = "President,Director")]
         [HttpGet("{id}")]
@@ -245,6 +249,17 @@ namespace University_Management_System.Controllers
             {
                 return Forbid();
             }
+        }
+
+
+        private int GetCurrentUserId()
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            if (!int.TryParse(userId, out var id))
+                throw new UnauthorizedAccessException("Invalid user ID.");
+
+            return id;
         }
 
     }

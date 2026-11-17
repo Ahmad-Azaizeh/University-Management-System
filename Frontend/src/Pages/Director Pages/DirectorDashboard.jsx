@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
@@ -6,6 +5,7 @@ const API = 'https://localhost:7245/api'
 
 function DirectorDashboard() {
   const { user } = useAuth()
+  const token = user?.token
 
   const [students, setStudents] = useState([])
   const [professors, setProfessors] = useState([])
@@ -16,22 +16,25 @@ function DirectorDashboard() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!token) return
+
     async function loadDashboard() {
       try {
-        setLoading(true)
-        setError('')
-
         const headers = {
-          Authorization: `Bearer ${user.token}`,
+          Authorization: `Bearer ${token}`,
         }
 
-        const [studentsResponse, professorsResponse, coursesResponse, enrollmentsResponse] =
-          await Promise.all([
-            fetch(`${API}/Students`, { headers }),
-            fetch(`${API}/Professors`, { headers }),
-            fetch(`${API}/Courses`, { headers }),
-            fetch(`${API}/Enrollments`, { headers }),
-          ])
+        const [
+          studentsResponse,
+          professorsResponse,
+          coursesResponse,
+          enrollmentsResponse,
+        ] = await Promise.all([
+          fetch(`${API}/Students?paginated=false`, { headers }),
+          fetch(`${API}/Professors?paginated=false`, { headers }),
+          fetch(`${API}/Courses?paginated=false`, { headers }),
+          fetch(`${API}/Enrollments?paginated=false`, { headers }),
+        ])
 
         if (
           !studentsResponse.ok ||
@@ -42,13 +45,17 @@ function DirectorDashboard() {
           throw new Error('Failed to load dashboard data.')
         }
 
-        const [studentsData, professorsData, coursesData, enrollmentsData] =
-          await Promise.all([
-            studentsResponse.json(),
-            professorsResponse.json(),
-            coursesResponse.json(),
-            enrollmentsResponse.json(),
-          ])
+        const [
+          studentsData,
+          professorsData,
+          coursesData,
+          enrollmentsData,
+        ] = await Promise.all([
+          studentsResponse.json(),
+          professorsResponse.json(),
+          coursesResponse.json(),
+          enrollmentsResponse.json(),
+        ])
 
         setStudents(studentsData)
         setProfessors(professorsData)
@@ -61,10 +68,8 @@ function DirectorDashboard() {
       }
     }
 
-    if (user?.token) {
-      loadDashboard()
-    }
-  }, [user])
+    loadDashboard()
+  }, [token])
 
   if (loading) return <p>Loading dashboard...</p>
 

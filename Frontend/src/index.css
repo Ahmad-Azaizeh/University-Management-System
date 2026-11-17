@@ -3749,3 +3749,74 @@ body,
   }
 }
 
+
+.students-search-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.students-search-form .students-search {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.students-search-button,
+.students-pagination-button {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 18px;
+  background: #142b53;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.students-search-button:hover,
+.students-pagination-button:hover:not(:disabled) {
+  background: #2e4b7e;
+}
+
+.students-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 24px;
+  padding-bottom: 10px;
+}
+
+.students-page-info {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary, #6b7280);
+}
+
+.students-pagination-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 480px) {
+  .students-search-form {
+    flex-wrap: wrap;
+  }
+
+  .students-search-form .students-search {
+    width: 100%;
+  }
+
+  .students-search-button {
+    width: 100%;
+  }
+
+  .students-pagination {
+    gap: 10px;
+  }
+}
+
+

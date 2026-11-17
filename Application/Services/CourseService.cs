@@ -1,9 +1,11 @@
 ﻿
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Courses;
 using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
 using UMS.Domain.Entities;
 using UMS.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace UMS.Application.Services
 {
@@ -94,6 +96,108 @@ namespace UMS.Application.Services
                 StudentCount = enrollments.Count(e => e.CourseId == c.Id)
             });
         }
+
+
+        public async Task<PagedResult<CourseDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize)
+        {
+            pageNumber = Math.Max(1, pageNumber);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+
+            var user = await GetAuthorizedCourseViewerAsync(currentUserId);
+
+            var courses = _courseRepository.GetQueryable(
+                "School",
+                "Professor.User"
+            );
+
+            if (user.Role == UserRole.Director)
+            {
+                var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+
+                courses = courses.Where(c => c.SchoolId == schoolId);
+            }
+            else if (user.Role == UserRole.Professor)
+            {
+                var professors = await _professorRepository.GetAllAsync();
+
+                var professor = professors.FirstOrDefault(
+                    p => p.UserId == user.Id
+                );
+
+                if (professor == null)
+                    throw new UnauthorizedAccessException(
+                        "Professor profile not found.");
+
+                courses = courses.Where(
+                    c => c.ProfessorId == professor.Id
+                );
+            }
+            else if (user.Role == UserRole.Student)
+            {
+                var students = await _studentRepository.GetAllAsync();
+
+                var student = students.FirstOrDefault(
+                    s => s.UserId == user.Id
+                );
+
+                if (student == null)
+                    throw new UnauthorizedAccessException(
+                        "Student profile not found.");
+
+                courses = courses.Where(
+                    c => c.SchoolId == student.SchoolId
+                );
+            }
+
+            var totalCount = await courses.CountAsync();
+
+            var courseItems = await courses
+                .OrderBy(c => c.Id)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var courseIds = courseItems
+                .Select(c => c.Id)
+                .ToList();
+
+            var studentCounts = await _enrollmentRepository
+                .GetQueryable()
+                .Where(e => courseIds.Contains(e.CourseId))
+                .GroupBy(e => e.CourseId)
+                .Select(g => new
+                {
+                    CourseId = g.Key,
+                    Count = g.Count()
+                })
+                .ToDictionaryAsync(
+                    x => x.CourseId,
+                    x => x.Count
+                );
+
+            var items = courseItems.Select(c => new CourseDto
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Code = c.Code,
+                SchoolId = c.SchoolId,
+                SchoolName = c.School.Name,
+                ProfessorId = c.ProfessorId,
+                ProfessorName = c.Professor == null
+                    ? null
+                    : c.Professor.User.FullName,
+                StudentCount = studentCounts.GetValueOrDefault(c.Id, 0)
+            }).ToList();
+
+            return new PagedResult<CourseDto>
+            {
+                Items = items,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                TotalCount = totalCount
+            };
+        }
+
 
         public async Task<CourseDto?> GetByIdAsync(int id, int currentUserId)
         {

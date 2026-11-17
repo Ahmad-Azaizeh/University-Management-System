@@ -1,9 +1,11 @@
 ﻿
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Professors;
 using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
 using UMS.Domain.Entities;
 using UMS.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace UMS.Application.Services
 {
@@ -53,6 +55,57 @@ namespace UMS.Application.Services
                 SchoolName = p.School.Name,
                 CourseCount = p.Courses.Count
             });
+        }
+
+
+        public async Task<PagedResult<ProfessorDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize)
+        {
+            pageNumber = Math.Max(1, pageNumber);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+
+            var user = await GetAuthorizedUserAsync(currentUserId);
+
+            var professors = _professorRepository.GetQueryable(
+                "User",
+                "School",
+                "Courses"
+            );
+
+            if (user.Role == UserRole.Director)
+            {
+                var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+
+                professors = professors.Where(
+                    p => p.SchoolId == schoolId
+                );
+            }
+
+            var totalCount = await professors.CountAsync();
+
+            var professorItems = await professors
+                .OrderBy(p => p.Id)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var items = professorItems.Select(p => new ProfessorDto
+            {
+                Id = p.Id,
+                UserId = p.UserId,
+                FullName = p.User.FullName,
+                EmployeeNumber = p.EmployeeNumber,
+                SchoolId = p.SchoolId,
+                SchoolName = p.School.Name,
+                CourseCount = p.Courses.Count
+            }).ToList();
+
+            return new PagedResult<ProfessorDto>
+            {
+                Items = items,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                TotalCount = totalCount
+            };
         }
 
 

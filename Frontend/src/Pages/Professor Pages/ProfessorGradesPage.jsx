@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
@@ -12,6 +11,7 @@ function formatDate(date) {
 
 function ProfessorGradesPage() {
   const { user } = useAuth()
+  const token = user?.token
 
   const [courses, setCourses] = useState([])
   const [selectedCourseId, setSelectedCourseId] = useState('')
@@ -27,13 +27,18 @@ function ProfessorGradesPage() {
 
   // Load professor's assigned courses
   useEffect(() => {
+    if (!token) return
+
     async function loadCourses() {
       try {
-        const response = await fetch(`${API}/Courses`, {
-          headers: {
-            Authorization: `Bearer ${user.token}`,
-          },
-        })
+        const response = await fetch(
+          `${API}/Courses?paginated=false`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        )
 
         if (!response.ok) {
           throw new Error('Failed to load courses.')
@@ -49,23 +54,19 @@ function ProfessorGradesPage() {
     }
 
     loadCourses()
-  }, [user])
+  }, [token])
 
   // Load students when a course is selected
   useEffect(() => {
-    if (!selectedCourseId) return
+    if (!selectedCourseId || !token) return
 
     async function loadStudents() {
       try {
-        setLoadingStudents(true)
-        setError('')
-        setSuccess('')
-
         const response = await fetch(
           `${API}/Enrollments/course/${selectedCourseId}/students`,
           {
             headers: {
-              Authorization: `Bearer ${user.token}`,
+              Authorization: `Bearer ${token}`,
             },
           }
         )
@@ -93,7 +94,7 @@ function ProfessorGradesPage() {
     }
 
     loadStudents()
-  }, [selectedCourseId, user])
+  }, [selectedCourseId, token])
 
   // Update local grade input
   function handleGradeChange(enrollmentId, value) {
@@ -129,7 +130,7 @@ function ProfessorGradesPage() {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${user.token}`,
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             grade: gradeValue === '' ? null : Number(gradeValue),
@@ -150,7 +151,7 @@ function ProfessorGradesPage() {
         `${API}/Enrollments/course/${selectedCourseId}/students`,
         {
           headers: {
-            Authorization: `Bearer ${user.token}`,
+            Authorization: `Bearer ${token}`,
           },
         }
       )
@@ -198,9 +199,12 @@ function ProfessorGradesPage() {
           id="courseSelect"
           value={selectedCourseId}
           onChange={(e) => {
-            setSelectedCourseId(e.target.value)
+            const value = e.target.value
+
+            setSelectedCourseId(value)
             setStudents([])
             setGrades({})
+            setLoadingStudents(Boolean(value))
             setError('')
             setSuccess('')
           }}

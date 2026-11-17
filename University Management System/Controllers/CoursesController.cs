@@ -22,20 +22,36 @@ namespace University_Management_System.Controllers
 
         [Authorize(Roles = "President,Director,Professor,Student")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<CourseDto>>> GetAll()
+        public async Task<IActionResult> GetAll(
+            [FromQuery] bool paginated = true,
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 10)
         {
             try
             {
-                var courses = await _courseService.GetAllAsync(
-                    GetCurrentUserId());
+                if (!paginated)
+                {
+                    var courses = await _courseService.GetAllAsync(
+                        GetCurrentUserId());
 
-                return Ok(courses);
+                    return Ok(courses);
+                }
+
+                var pagedCourses = await _courseService.GetAllPagedAsync(
+                    GetCurrentUserId(),
+                    pageNumber,
+                    pageSize
+                );
+
+                return Ok(pagedCourses);
             }
             catch (UnauthorizedAccessException)
             {
                 return Forbid();
             }
         }
+
+
 
         [Authorize(Roles = "President,Director,Professor,Student")]
         [HttpGet("{id}")]
@@ -56,6 +72,8 @@ namespace University_Management_System.Controllers
                 return Forbid();
             }
         }
+
+
 
         [Authorize(Roles = "President,Director")]
         [HttpPost]
@@ -81,6 +99,8 @@ namespace University_Management_System.Controllers
             }
         }
 
+
+
         [Authorize(Roles = "President,Director")]
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, UpdateCourseDto dto)
@@ -104,6 +124,8 @@ namespace University_Management_System.Controllers
                 return Forbid();
             }
         }
+
+
 
         [Authorize(Roles = "President,Director")]
         [HttpDelete("{id}")]

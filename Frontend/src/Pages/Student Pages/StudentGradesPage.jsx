@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
@@ -6,17 +5,20 @@ const API = 'https://localhost:7245/api'
 
 function StudentGradesPage() {
   const { user } = useAuth()
+  const token = user?.token
 
   const [student, setStudent] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (!token) return
+
     async function loadGrades() {
       try {
         const response = await fetch(`${API}/Students/me`, {
           headers: {
-            Authorization: `Bearer ${user.token}`,
+            Authorization: `Bearer ${token}`,
           },
         })
 
@@ -34,7 +36,7 @@ function StudentGradesPage() {
     }
 
     loadGrades()
-  }, [user.token])
+  }, [token])
 
   if (loading) return <p>Loading your grades...</p>
 

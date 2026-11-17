@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const API = 'https://localhost:7245/api'
+const PAGE_SIZE = 10
 
 const STATUS_OPTIONS = [
   { label: 'All', value: 'all' },
@@ -33,7 +34,6 @@ function getStatusLabel(status) {
 
 function formatDate(date) {
   if (!date) return '—'
-
   return new Date(date).toLocaleDateString()
 }
 
@@ -43,6 +43,52 @@ async function getErrorMessage(response, fallback) {
     return errorData.message || fallback
   } catch {
     return fallback
+  }
+}
+
+async function fetchEnrollmentData({
+  token,
+  pageNumber,
+  search,
+  selectedStatus,
+  selectedCourse,
+  selectedSchool,
+  isPresident,
+  signal,
+}) {
+  const hasFilters =
+    search.trim() !== '' ||
+    selectedStatus !== 'all' ||
+    selectedCourse !== 'all' ||
+    (isPresident && selectedSchool !== 'all')
+
+  const endpoint = hasFilters
+    ? `${API}/Enrollments?paginated=false`
+    : `${API}/Enrollments?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`
+
+  const response = await fetch(endpoint, {
+    headers: getAuthHeaders(token),
+    signal,
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to load enrollments.')
+  }
+
+  const data = await response.json()
+
+  if (hasFilters) {
+    return {
+      items: data,
+      totalCount: data.length,
+      totalPages: 1,
+    }
+  }
+
+  return {
+    items: data.items,
+    totalCount: data.totalCount,
+    totalPages: data.totalPages,
   }
 }
 
@@ -58,6 +104,9 @@ function EnrollmentsPage() {
   const [courses, setCourses] = useState([])
   const [schools, setSchools] = useState([])
 
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [actionError, setActionError] = useState('')
@@ -67,6 +116,8 @@ function EnrollmentsPage() {
   const [selectedCourse, setSelectedCourse] = useState('all')
   const [selectedSchool, setSelectedSchool] = useState('all')
 
+  const [pageNumber, setPageNumber] = useState(1)
+
   const [showForm, setShowForm] = useState(false)
   const [studentId, setStudentId] = useState('')
   const [courseId, setCourseId] = useState('')
@@ -75,23 +126,39 @@ function EnrollmentsPage() {
   const [studentSearch, setStudentSearch] = useState('')
   const [selectedStudent, setSelectedStudent] = useState(null)
 
-  // Load initial data
-  useEffect(() => {
-    async function loadData() {
-      try {
-        setError('')
+  const hasFilters =
+    search.trim() !== '' ||
+    selectedStatus !== 'all' ||
+    selectedCourse !== 'all' ||
+    (isPresident && selectedSchool !== 'all')
 
+  // Load reference data
+  useEffect(() => {
+    if (!token) return
+
+    const controller = new AbortController()
+
+    async function loadReferenceData() {
+      try {
         const headers = getAuthHeaders(token)
 
         const requests = [
-          fetch(`${API}/Enrollments`, { headers }),
-          fetch(`${API}/Students`, { headers }),
-          fetch(`${API}/Courses`, { headers }),
+          fetch(`${API}/Students?paginated=false`, {
+            headers,
+            signal: controller.signal,
+          }),
+          fetch(`${API}/Courses?paginated=false`, {
+            headers,
+            signal: controller.signal,
+          }),
         ]
 
         if (isPresident) {
           requests.push(
-            fetch(`${API}/Schools`, { headers })
+            fetch(`${API}/Schools`, {
+              headers,
+              signal: controller.signal,
+            })
           )
         }
 
@@ -105,37 +172,86 @@ function EnrollmentsPage() {
           responses.map((response) => response.json())
         )
 
-        setEnrollments(data[0])
-        setStudents(data[1])
-        setCourses(data[2])
+        setStudents(data[0])
+        setCourses(data[1])
 
         if (isPresident) {
-          setSchools(data[3])
+          setSchools(data[2])
         }
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
-      } finally {
-        setLoading(false)
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Something went wrong.')
+          setLoading(false)
+        }
       }
     }
 
-    if (token) {
-      loadData()
-    } 
+    loadReferenceData()
+
+    return () => controller.abort()
   }, [token, isPresident])
 
-  // Refresh enrollments
-  async function refreshEnrollments() {
-    const response = await fetch(`${API}/Enrollments`, {
-      headers: getAuthHeaders(token),
-    })
+  // Fetch enrollments according to search and filters
+  useEffect(() => {
+    if (!token) return
 
-    if (!response.ok) {
-      throw new Error('Failed to refresh enrollments.')
+    const controller = new AbortController()
+
+    async function loadEnrollments() {
+      try {
+        const data = await fetchEnrollmentData({
+          token,
+          pageNumber,
+          search,
+          selectedStatus,
+          selectedCourse,
+          selectedSchool,
+          isPresident,
+          signal: controller.signal,
+        })
+
+        setEnrollments(data.items)
+        setTotalCount(data.totalCount)
+        setTotalPages(data.totalPages)
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Something went wrong.')
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
+      }
     }
 
-    const data = await response.json()
-    setEnrollments(data)
+    loadEnrollments()
+
+    return () => controller.abort()
+  }, [
+    token,
+    pageNumber,
+    search,
+    selectedStatus,
+    selectedCourse,
+    selectedSchool,
+    isPresident,
+  ])
+
+  // Refresh enrollments after an action
+  async function refreshEnrollments(targetPage = pageNumber) {
+    const data = await fetchEnrollmentData({
+      token,
+      pageNumber: targetPage,
+      search,
+      selectedStatus,
+      selectedCourse,
+      selectedSchool,
+      isPresident,
+    })
+
+    setEnrollments(data.items)
+    setTotalCount(data.totalCount)
+    setTotalPages(data.totalPages)
   }
 
   // Create direct enrollment
@@ -169,11 +285,14 @@ function EnrollmentsPage() {
         )
       }
 
-      await refreshEnrollments()
-
       setStudentId('')
       setCourseId('')
+      setSelectedStudent(null)
+      setStudentSearch('')
       setShowForm(false)
+
+      setPageNumber(1)
+      await refreshEnrollments(1)
     } catch (err) {
       setActionError(err.message || 'Something went wrong.')
     } finally {
@@ -207,38 +326,36 @@ function EnrollmentsPage() {
   }
 
   async function handleDeleteEnrollment(enrollment) {
-  const confirmed = window.confirm(
-    `Are you sure you want to delete ${enrollment.studentName}'s enrollment in ${enrollment.courseName}?`
-  )
-
-  if (!confirmed) return
-
-  try {
-    setActionError('')
-
-    const response = await fetch(
-      `${API}/Enrollments/${enrollment.id}`,
-      {
-        method: 'DELETE',
-        headers: getAuthHeaders(token),
-      }
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${enrollment.studentName}'s enrollment in ${enrollment.courseName}?`
     )
 
-    if (!response.ok) {
-      throw new Error(
-        await getErrorMessage(response, 'Failed to delete enrollment.')
+    if (!confirmed) return
+
+    try {
+      setActionError('')
+
+      const response = await fetch(
+        `${API}/Enrollments/${enrollment.id}`,
+        {
+          method: 'DELETE',
+          headers: getAuthHeaders(token),
+        }
       )
+
+      if (!response.ok) {
+        throw new Error(
+          await getErrorMessage(response, 'Failed to delete enrollment.')
+        )
+      }
+
+      await refreshEnrollments()
+    } catch (err) {
+      setActionError(err.message || 'Something went wrong.')
     }
-
-    setEnrollments((previous) =>
-      previous.filter((e) => e.id !== enrollment.id)
-    )
-  } catch (err) {
-    setActionError(err.message || 'Something went wrong.')
   }
-}
 
-  // Filter enrollments
+  // Apply search and filters to the loaded enrollment records
   const filteredEnrollments = enrollments.filter((enrollment) => {
     const matchesStatus =
       selectedStatus === 'all' ||
@@ -278,12 +395,22 @@ function EnrollmentsPage() {
 
   // Count enrollments by status
   const statusCounts = {
-    all: enrollments.length,
+    all: hasFilters ? enrollments.length : totalCount,
     0: enrollments.filter((e) => Number(e.status) === 0).length,
     1: enrollments.filter((e) => Number(e.status) === 1).length,
     2: enrollments.filter((e) => Number(e.status) === 2).length,
     3: enrollments.filter((e) => Number(e.status) === 3).length,
     4: enrollments.filter((e) => Number(e.status) === 4).length,
+  }
+
+  function goToPreviousPage() {
+    setPageNumber((previous) => Math.max(previous - 1, 1))
+  }
+
+  function goToNextPage() {
+    setPageNumber((previous) =>
+      Math.min(previous + 1, totalPages)
+    )
   }
 
   if (loading) {
@@ -295,15 +422,15 @@ function EnrollmentsPage() {
   }
 
   const filteredStudents = students
-  .filter((student) => {
-    const searchValue = studentSearch.toLowerCase()
+    .filter((student) => {
+      const searchValue = studentSearch.toLowerCase()
 
-    return (
-      student.fullName?.toLowerCase().includes(searchValue) ||
-      student.studentNumber?.toLowerCase().includes(searchValue)
-    )
-  })
-  .slice(0, 10)
+      return (
+        student.fullName?.toLowerCase().includes(searchValue) ||
+        student.studentNumber?.toLowerCase().includes(searchValue)
+      )
+    })
+    .slice(0, 10)
 
   return (
     <div className="dashboard-content enrollments-page">
@@ -335,8 +462,7 @@ function EnrollmentsPage() {
         >
           <h3>Create Direct Enrollment</h3>
 
-          
-            <div className="enrollment-student-search">
+          <div className="enrollment-student-search">
             <label>Student</label>
 
             {selectedStudent ? (
@@ -344,53 +470,53 @@ function EnrollmentsPage() {
                 <div>
                   <strong>{selectedStudent.fullName}</strong>
                   <span>{selectedStudent.studentNumber}</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedStudent(null)
+                    setStudentId('')
+                    setStudentSearch('')
+                  }}
+                >
+                  Clear
+                </button>
               </div>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder="Search by student name or number..."
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                />
 
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedStudent(null)
-                  setStudentId('')
-                  setStudentSearch('')
-                }}>
-                Clear
-              </button>
-    </div>
-  ) : (
-    <>
-      <input
-        type="text"
-        placeholder="Search by student name or number..."
-        value={studentSearch}
-        onChange={(e) => setStudentSearch(e.target.value)}
-      />
-
-      {studentSearch.trim() && (
-        <div className="enrollment-student-results">
-          {filteredStudents.length > 0 ? (
-            filteredStudents.map((student) => (
-              <button
-                type="button"
-                key={student.id}
-                onClick={() => {
-                  setSelectedStudent(student)
-                  setStudentId(String(student.id))
-                  setStudentSearch('')
-                }}
-              >
-                <strong>{student.fullName}</strong>
-                <span>{student.studentNumber}</span>
-              </button>
-            ))
-          ) : (
-            <p>No students found.</p>
-          )}
-        </div>
-      )}
-    </>
-  )}
-</div>
-          
+                {studentSearch.trim() && (
+                  <div className="enrollment-student-results">
+                    {filteredStudents.length > 0 ? (
+                      filteredStudents.map((student) => (
+                        <button
+                          type="button"
+                          key={student.id}
+                          onClick={() => {
+                            setSelectedStudent(student)
+                            setStudentId(String(student.id))
+                            setStudentSearch('')
+                          }}
+                        >
+                          <strong>{student.fullName}</strong>
+                          <span>{student.studentNumber}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p>No students found.</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
 
           <div>
             <label>Course</label>
@@ -429,7 +555,10 @@ function EnrollmentsPage() {
                 ? 'enrollment-filter active'
                 : 'enrollment-filter'
             }
-            onClick={() => setSelectedStatus(status.value)}
+            onClick={() => {
+              setSelectedStatus(status.value)
+              setPageNumber(1)
+            }}
           >
             {status.label}
             <span>{statusCounts[status.value]}</span>
@@ -443,12 +572,18 @@ function EnrollmentsPage() {
           type="text"
           placeholder="Search by student or course..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            setPageNumber(1)
+          }}
         />
 
         <select
           value={selectedCourse}
-          onChange={(e) => setSelectedCourse(e.target.value)}
+          onChange={(e) => {
+            setSelectedCourse(e.target.value)
+            setPageNumber(1)
+          }}
         >
           <option value="all">All courses</option>
 
@@ -462,7 +597,10 @@ function EnrollmentsPage() {
         {isPresident && (
           <select
             value={selectedSchool}
-            onChange={(e) => setSelectedSchool(e.target.value)}
+            onChange={(e) => {
+              setSelectedSchool(e.target.value)
+              setPageNumber(1)
+            }}
           >
             <option value="all">All schools</option>
 
@@ -475,7 +613,7 @@ function EnrollmentsPage() {
         )}
 
         <span className="enrollment-count">
-          {filteredEnrollments.length} enrollments
+          {hasFilters ? filteredEnrollments.length : totalCount} enrollments
         </span>
       </div>
 
@@ -581,6 +719,30 @@ function EnrollmentsPage() {
           </tbody>
         </table>
       </div>
+
+      {!hasFilters && totalPages > 1 && (
+        <div className="students-pagination">
+          <button
+            className="students-pagination-button"
+            onClick={goToPreviousPage}
+            disabled={pageNumber === 1}
+          >
+            Previous
+          </button>
+
+          <span className="students-page-info">
+            Page {pageNumber} of {totalPages}
+          </span>
+
+          <button
+            className="students-pagination-button"
+            onClick={goToNextPage}
+            disabled={pageNumber === totalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   )
 }

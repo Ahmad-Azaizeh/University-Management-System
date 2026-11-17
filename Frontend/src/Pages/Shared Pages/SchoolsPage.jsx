@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 
@@ -28,14 +27,6 @@ function SchoolsPage() {
   // Load schools and available Directors
   useEffect(() => {
     async function loadData() {
-      if (!user?.token) {
-        setLoading(false)
-        return
-      }
-
-      setLoading(true)
-      setError('')
-
       try {
         const headers = {
           Authorization: `Bearer ${user.token}`,
@@ -68,7 +59,9 @@ function SchoolsPage() {
       }
     }
 
-    loadData()
+    if (user?.token) {
+      loadData()
+    }
   }, [user?.token, refreshKey])
 
   // Open create form

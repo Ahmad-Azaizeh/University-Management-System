@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Text;
 using UMS.Application.Interfaces;
 
@@ -28,6 +29,46 @@ namespace UMS.Infrastructure.Repositories
 
             return await query.ToListAsync();
         }
+
+
+        public async Task<(IEnumerable<T> Items, int TotalCount)> GetPagedAsync(
+            int pageNumber, int pageSize, Expression<Func<T, bool>>? filter = null, params string[] includes)
+        {
+            IQueryable<T> query = _dbSet.AsNoTracking();
+
+            if (filter != null)
+            {
+                query = query.Where(filter);
+            }
+
+            foreach (var include in includes)
+            {
+                query = query.Include(include);
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return (items, totalCount);
+        }
+
+
+        public IQueryable<T> GetQueryable(params string[] includes)
+        {
+            IQueryable<T> query = _dbSet.AsNoTracking();
+
+            foreach (var include in includes)
+            {
+                query = query.Include(include);
+            }
+
+            return query;
+        }
+
 
         public async Task<T?> GetByIdAsync(int id)
         {

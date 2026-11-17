@@ -2,9 +2,11 @@ import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const API_URL = 'https://localhost:7245/api'
+const PAGE_SIZE = 10
 
 function ProfessorsPage() {
   const { user } = useAuth()
+  const token = user?.token
 
   const [professors, setProfessors] = useState([])
   const [schools, setSchools] = useState([])
@@ -12,6 +14,11 @@ function ProfessorsPage() {
   const [error, setError] = useState('')
   const [formError, setFormError] = useState('')
   const [search, setSearch] = useState('')
+  const [activeSearch, setActiveSearch] = useState('')
+  const [pageNumber, setPageNumber] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const [selectedProfessorId, setSelectedProfessorId] = useState(null)
   const [professorCourses, setProfessorCourses] = useState({})
@@ -38,34 +45,45 @@ function ProfessorsPage() {
     async function fetchData() {
       try {
         const headers = {
-          Authorization: `Bearer ${user.token}`,
+          Authorization: `Bearer ${token}`,
         }
 
-        const professorsResponse = await fetch(
-          `${API_URL}/Professors`,
-          { headers }
-        )
+        const professorsUrl = activeSearch
+          ? `${API_URL}/Professors?paginated=false`
+          : `${API_URL}/Professors?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`
 
-        if (!professorsResponse.ok) {
+        const requests = [
+          fetch(professorsUrl, { headers }),
+        ]
+
+        if (isPresident) {
+          requests.push(fetch(`${API_URL}/Schools`, { headers }))
+        }
+
+        const responses = await Promise.all(requests)
+
+        if (responses.some((response) => !response.ok)) {
           throw new Error('Failed to load professors.')
         }
 
-        const professorsData = await professorsResponse.json()
-        setProfessors(professorsData)
+        const professorsData = await responses[0].json()
+
+        if (activeSearch) {
+          setProfessors(professorsData)
+          setTotalCount(professorsData.length)
+          setTotalPages(1)
+        } else {
+          setProfessors(professorsData.items)
+          setTotalCount(professorsData.totalCount)
+          setTotalPages(professorsData.totalPages)
+        }
 
         if (isPresident) {
-          const schoolsResponse = await fetch(
-            `${API_URL}/Schools`,
-            { headers }
-          )
-
-          if (!schoolsResponse.ok) {
-            throw new Error('Failed to load schools.')
-          }
-
-          const schoolsData = await schoolsResponse.json()
+          const schoolsData = await responses[1].json()
           setSchools(schoolsData)
         }
+
+        setError('')
       } catch (err) {
         setError(err.message || 'Something went wrong.')
       } finally {
@@ -73,10 +91,10 @@ function ProfessorsPage() {
       }
     }
 
-    if (user?.token) {
+    if (token) {
       fetchData()
     }
-  }, [user, isPresident])
+  }, [token, isPresident, pageNumber, activeSearch, refreshKey])
 
   async function handleProfessorView(professorId) {
     if (selectedProfessorId === professorId) {
@@ -99,11 +117,14 @@ function ProfessorsPage() {
     }))
 
     try {
-      const response = await fetch(`${API_URL}/Courses`, {
-        headers: {
-          Authorization: `Bearer ${user.token}`,
-        },
-      })
+      const response = await fetch(
+        `${API_URL}/Courses?paginated=false`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
 
       if (!response.ok) {
         throw new Error('Failed to load assigned courses.')
@@ -199,7 +220,7 @@ function ProfessorsPage() {
 
     try {
       const headers = {
-        Authorization: `Bearer ${user.token}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       }
 
@@ -238,30 +259,19 @@ function ProfessorsPage() {
       if (!response.ok) {
         const message = await response.text()
         throw new Error(
-          message || `Failed to ${editingProfessor ? 'update' : 'create'} professor.`
+          message ||
+            `Failed to ${editingProfessor ? 'update' : 'create'} professor.`
         )
       }
-
-      const professorsResponse = await fetch(
-        `${API_URL}/Professors`,
-        {
-          headers: {
-            Authorization: `Bearer ${user.token}`,
-          },
-        }
-      )
-
-      if (!professorsResponse.ok) {
-        throw new Error('Professor saved, but the list could not be refreshed.')
-      }
-
-      const updatedProfessors = await professorsResponse.json()
-      setProfessors(updatedProfessors)
 
       setProfessorCourses({})
       setSelectedProfessorId(null)
       setShowForm(false)
       setEditingProfessor(null)
+      setSearch('')
+      setActiveSearch('')
+      setPageNumber(1)
+      setRefreshKey((previous) => previous + 1)
     } catch (err) {
       setFormError(err.message || 'Something went wrong.')
     } finally {
@@ -285,7 +295,7 @@ function ProfessorsPage() {
         {
           method: 'DELETE',
           headers: {
-            Authorization: `Bearer ${user.token}`,
+            Authorization: `Bearer ${token}`,
           },
         }
       )
@@ -298,15 +308,23 @@ function ProfessorsPage() {
           const data = JSON.parse(responseText)
           message = data.message || responseText
         } catch {
-          throw new Error(responseText || 'Failed to delete professor.')
+          throw new Error(
+            responseText || 'Failed to delete professor.'
+          )
         }
 
         throw new Error(message || 'Failed to delete professor.')
       }
 
-      setProfessors((previous) =>
-        previous.filter((p) => p.id !== professor.id)
-      )
+      if (
+        professors.length === 1 &&
+        pageNumber > 1 &&
+        !activeSearch
+      ) {
+        setPageNumber((previous) => previous - 1)
+      }
+
+      setRefreshKey((previous) => previous + 1)
 
       setProfessorCourses((previous) => {
         const updated = { ...previous }
@@ -330,9 +348,31 @@ function ProfessorsPage() {
       professor.employeeNumber,
       professor.schoolName,
     ].some((value) =>
-      (value ?? '').toLowerCase().includes(search.toLowerCase())
+      (value ?? '').toLowerCase().includes(activeSearch.toLowerCase())
     )
   )
+
+  function handleSearchSubmit(e) {
+    e.preventDefault()
+    setPageNumber(1)
+    setActiveSearch(search.trim())
+  }
+
+  function handleClearSearch() {
+    setSearch('')
+    setActiveSearch('')
+    setPageNumber(1)
+  }
+
+  function goToPreviousPage() {
+    setPageNumber((previous) => Math.max(previous - 1, 1))
+  }
+
+  function goToNextPage() {
+    setPageNumber((previous) =>
+      Math.min(previous + 1, totalPages)
+    )
+  }
 
   if (loading) {
     return (
@@ -356,7 +396,9 @@ function ProfessorsPage() {
 
         <div className="students-header-actions">
           <span className="students-count">
-            {filteredProfessors.length} professors
+            {activeSearch
+              ? filteredProfessors.length
+              : totalCount} professors
           </span>
 
           <button
@@ -370,13 +412,35 @@ function ProfessorsPage() {
 
       {error && <p className="students-error">{error}</p>}
 
-      <input
-        className="students-search"
-        type="text"
-        placeholder="Search by name, employee number, or school..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
+      <form
+        className="students-search-form"
+        onSubmit={handleSearchSubmit}
+      >
+        <input
+          className="students-search"
+          type="text"
+          placeholder="Search by name, employee number, or school..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        <button
+          className="students-search-button"
+          type="submit"
+        >
+          Search
+        </button>
+
+        {activeSearch && (
+          <button
+            className="students-search-button"
+            type="button"
+            onClick={handleClearSearch}
+          >
+            Clear
+          </button>
+        )}
+      </form>
 
       <div className="students-table-wrapper">
         <table className="students-table">
@@ -399,6 +463,7 @@ function ProfessorsPage() {
                   <td>{professor.employeeNumber}</td>
                   <td>{professor.schoolName}</td>
                   <td>{professor.courseCount}</td>
+
                   <td>
                     <button
                       className="student-details-button"
@@ -411,6 +476,7 @@ function ProfessorsPage() {
                         : 'View'}
                     </button>
                   </td>
+
                   <td>
                     <div className="students-actions">
                       <button
@@ -494,6 +560,30 @@ function ProfessorsPage() {
         </table>
       </div>
 
+      {!activeSearch && totalCount > PAGE_SIZE && (
+        <div className="students-pagination">
+          <button
+            className="students-pagination-button"
+            onClick={goToPreviousPage}
+            disabled={pageNumber === 1}
+          >
+            Previous
+          </button>
+
+          <span className="students-page-info">
+            Page {pageNumber} of {totalPages}
+          </span>
+
+          <button
+            className="students-pagination-button"
+            onClick={goToNextPage}
+            disabled={pageNumber === totalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
+
       {showForm && (
         <div className="students-modal-overlay">
           <div className="students-modal">
@@ -561,6 +651,7 @@ function ProfessorsPage() {
                         required
                       >
                         <option value="">Select a school</option>
+
                         {schools.map((school) => (
                           <option key={school.id} value={school.id}>
                             {school.name}

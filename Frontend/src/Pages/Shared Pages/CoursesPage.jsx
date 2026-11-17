@@ -1,7 +1,9 @@
+
 import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const API_URL = 'https://localhost:7245/api'
+const PAGE_SIZE = 10
 
 function CoursesPage() {
   const { user } = useAuth()
@@ -14,6 +16,12 @@ function CoursesPage() {
   const [error, setError] = useState('')
   const [formError, setFormError] = useState('')
   const [search, setSearch] = useState('')
+  const [activeSearch, setActiveSearch] = useState('')
+
+  const [pageNumber, setPageNumber] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const [selectedCourseId, setSelectedCourseId] = useState(null)
   const [courseStudents, setCourseStudents] = useState({})
@@ -44,12 +52,19 @@ function CoursesPage() {
   useEffect(() => {
     async function fetchData() {
       try {
+        setLoading(true)
+        setError('')
+
         const headers = {
           Authorization: `Bearer ${user.token}`,
         }
 
+        const coursesUrl = activeSearch
+          ? `${API_URL}/Courses?paginated=false`
+          : `${API_URL}/Courses?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`
+
         const coursesResponse = await fetch(
-          `${API_URL}/Courses`,
+          coursesUrl,
           { headers }
         )
 
@@ -58,11 +73,20 @@ function CoursesPage() {
         }
 
         const coursesData = await coursesResponse.json()
-        setCourses(coursesData)
+
+        if (activeSearch) {
+          setCourses(coursesData)
+          setTotalCount(coursesData.length)
+          setTotalPages(1)
+        } else {
+          setCourses(coursesData.items || [])
+          setTotalCount(coursesData.totalCount || 0)
+          setTotalPages(coursesData.totalPages || 1)
+        }
 
         if (canManageCourses) {
           const professorsResponse = await fetch(
-            `${API_URL}/Professors`,
+            `${API_URL}/Professors?paginated=false`,
             { headers }
           )
 
@@ -99,7 +123,21 @@ function CoursesPage() {
     } else {
       setLoading(false)
     }
-  }, [user, isPresident, canManageCourses])
+  }, [
+    user?.token,
+    isPresident,
+    canManageCourses,
+    pageNumber,
+    activeSearch,
+    refreshKey,
+  ])
+
+  // Search courses
+  function handleSearch(e) {
+    e.preventDefault()
+    setPageNumber(1)
+    setActiveSearch(search.trim())
+  }
 
   // View students enrolled in a course
   async function handleCourseView(courseId) {
@@ -269,27 +307,18 @@ function CoursesPage() {
         )
       }
 
-      // Refresh courses
-      const coursesResponse = await fetch(
-        `${API_URL}/Courses`,
-        {
-          headers: {
-            Authorization: `Bearer ${user.token}`,
-          },
-        }
-      )
-
-      if (!coursesResponse.ok) {
-        throw new Error('Course saved, but the list could not be refreshed.')
-      }
-
-      const updatedCourses = await coursesResponse.json()
-      setCourses(updatedCourses)
-
       setCourseStudents({})
       setSelectedCourseId(null)
       setShowForm(false)
       setEditingCourse(null)
+
+      if (!editingCourse) {
+        setPageNumber(1)
+        setActiveSearch('')
+        setSearch('')
+      }
+
+      setRefreshKey((previous) => previous + 1)
     } catch (err) {
       setFormError(err.message || 'Something went wrong.')
     } finally {
@@ -325,10 +354,6 @@ function CoursesPage() {
         throw new Error(message || 'Failed to delete course.')
       }
 
-      setCourses((previous) =>
-        previous.filter((c) => c.id !== course.id)
-      )
-
       setCourseStudents((previous) => {
         const updated = { ...previous }
         delete updated[course.id]
@@ -338,11 +363,24 @@ function CoursesPage() {
       if (selectedCourseId === course.id) {
         setSelectedCourseId(null)
       }
+
+      setRefreshKey((previous) => previous + 1)
     } catch (err) {
       setError(err.message || 'Something went wrong.')
     } finally {
       setDeletingCourseId(null)
     }
+  }
+
+  // Pagination
+  function goToPreviousPage() {
+    setPageNumber((previous) => Math.max(previous - 1, 1))
+  }
+
+  function goToNextPage() {
+    setPageNumber((previous) =>
+      Math.min(previous + 1, totalPages)
+    )
   }
 
   // Filter professors according to the selected school
@@ -354,7 +392,7 @@ function CoursesPage() {
       )
     : professors
 
-  // Search courses
+  // Filter courses using the submitted search
   const filteredCourses = courses.filter((course) =>
     [
       course.name,
@@ -362,7 +400,7 @@ function CoursesPage() {
       course.schoolName,
       course.professorName,
     ].some((value) =>
-      (value ?? '').toLowerCase().includes(search.toLowerCase())
+      (value ?? '').toLowerCase().includes(activeSearch.toLowerCase())
     )
   )
 
@@ -388,7 +426,7 @@ function CoursesPage() {
 
         <div className="students-header-actions">
           <span className="students-count">
-            {filteredCourses.length} courses
+            {activeSearch ? filteredCourses.length : totalCount} courses
           </span>
 
           {canManageCourses && (
@@ -406,13 +444,25 @@ function CoursesPage() {
         <p className="students-error">{error}</p>
       )}
 
-      <input
-        className="students-search"
-        type="text"
-        placeholder="Search by course, code, school, or professor..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
+      <form
+        className="students-search-form"
+        onSubmit={handleSearch}
+      >
+        <input
+          className="students-search"
+          type="text"
+          placeholder="Search by course, code, school, or professor..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        <button
+          type="submit"
+          className="students-search-button"
+        >
+          Search
+        </button>
+      </form>
 
       <div className="students-table-wrapper">
         <table className="students-table">
@@ -535,6 +585,30 @@ function CoursesPage() {
           </tbody>
         </table>
       </div>
+
+      {!activeSearch && totalPages > 1 && (
+        <div className="students-pagination">
+          <button
+            className="students-pagination-button"
+            onClick={goToPreviousPage}
+            disabled={pageNumber === 1}
+          >
+            Previous
+          </button>
+
+          <span className="students-page-info">
+            Page {pageNumber} of {totalPages}
+          </span>
+
+          <button
+            className="students-pagination-button"
+            onClick={goToNextPage}
+            disabled={pageNumber === totalPages}
+          >
+            Next
+          </button>
+        </div>
+      )}
 
       {/* Add / Edit Form */}
       {showForm && (

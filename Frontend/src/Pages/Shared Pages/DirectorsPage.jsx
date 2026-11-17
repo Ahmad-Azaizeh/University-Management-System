@@ -42,14 +42,6 @@ function DirectorsPage() {
   // Load Directors and Schools
   useEffect(() => {
     async function loadData() {
-      if (!user?.token) {
-        setLoading(false)
-        return
-      }
-
-      setLoading(true)
-      setError('')
-
       try {
         const headers = {
           Authorization: `Bearer ${user.token}`,
@@ -88,7 +80,9 @@ function DirectorsPage() {
       }
     }
 
-    loadData()
+    if (user?.token) {
+      loadData()
+    }
   }, [user?.token, refreshKey])
 
   // Find the Director's assigned school

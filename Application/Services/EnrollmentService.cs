@@ -1,9 +1,11 @@
 ﻿
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Enrollments;
 using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
 using UMS.Domain.Entities;
 using UMS.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace UMS.Application.Services
 {
@@ -73,6 +75,69 @@ namespace UMS.Application.Services
                 CompletedAt = e.CompletedAt
             });
         }
+
+
+        public async Task<PagedResult<EnrollmentDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize)
+        {
+            pageNumber = Math.Max(1, pageNumber);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+
+            var user = await GetAuthorizedUserAsync(currentUserId);
+
+            var enrollments = _enrollmentRepository.GetQueryable(
+                "Student.User",
+                "Course"
+            );
+
+            if (user.Role == UserRole.Director)
+            {
+                var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+
+                var students = await _studentRepository.GetAllAsync();
+
+                var studentIds = students
+                    .Where(s => s.SchoolId == schoolId)
+                    .Select(s => s.Id)
+                    .ToHashSet();
+
+                enrollments = enrollments.Where(e =>
+                    studentIds.Contains(e.StudentId) &&
+                    e.Course.SchoolId == schoolId);
+            }
+
+            var totalCount = await enrollments.CountAsync();
+
+            var enrollmentItems = await enrollments
+                .OrderBy(e => e.Id)
+                .Skip((pageNumber - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            var items = enrollmentItems.Select(e => new EnrollmentDto
+            {
+                Id = e.Id,
+                StudentId = e.StudentId,
+                StudentName = e.Student.User.FullName,
+                StudentNumber = e.Student.StudentNumber,
+                CourseId = e.CourseId,
+                CourseName = e.Course.Name,
+                CourseCode = e.Course.Code,
+                EnrollmentDate = e.EnrollmentDate,
+                Grade = e.Grade,
+                Status = e.Status,
+                DecisionDate = e.DecisionDate,
+                CompletedAt = e.CompletedAt
+            }).ToList();
+
+            return new PagedResult<EnrollmentDto>
+            {
+                Items = items,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                TotalCount = totalCount
+            };
+        }
+
 
         public async Task<EnrollmentDto?> GetByIdAsync(int id, int currentUserId)
         {

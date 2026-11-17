@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
@@ -20,6 +19,7 @@ function formatDate(date) {
 
 function StudentEnrollmentsPage() {
   const { user } = useAuth()
+  const token = user?.token
 
   const [courses, setCourses] = useState([])
   const [enrollments, setEnrollments] = useState([])
@@ -33,18 +33,19 @@ function StudentEnrollmentsPage() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  
-
   // Load available courses and enrollment history
   useEffect(() => {
+    if (!token) return
+
     async function loadData() {
       const headers = {
-    Authorization: `Bearer ${user.token}`,
-  }
+        Authorization: `Bearer ${token}`,
+      }
+
       try {
         const [coursesResponse, enrollmentsResponse] =
           await Promise.all([
-            fetch(`${API}/Courses`, { headers }),
+            fetch(`${API}/Courses?paginated=false`, { headers }),
             fetch(`${API}/Enrollments/me`, { headers }),
           ])
 
@@ -68,17 +69,15 @@ function StudentEnrollmentsPage() {
       }
     }
 
-    if (user?.token) {
-      loadData()
-    }
-  }, [user?.token])
+    loadData()
+  }, [token])
 
   // Refresh enrollment history
   async function refreshEnrollments() {
     const headers = {
-    Authorization: `Bearer ${user.token}`,
+      Authorization: `Bearer ${token}`,
     }
-    
+
     const response = await fetch(`${API}/Enrollments/me`, {
       headers,
     })
@@ -91,12 +90,15 @@ function StudentEnrollmentsPage() {
     setEnrollments(data)
   }
 
+  // Enrollment counts
+  const activeEnrollments = enrollments.filter(
+    (enrollment) =>
+      Number(enrollment.status) === 0 ||
+      Number(enrollment.status) === 1
+  )
+
   // Request enrollment
   async function handleRequestEnrollment() {
-    const headers = {
-    Authorization: `Bearer ${user.token}`,
-    }
-
     if (!selectedCourseId) {
       setError('Please select a course.')
       return
@@ -109,7 +111,7 @@ function StudentEnrollmentsPage() {
 
     const existingEnrollment = enrollments.find(
       (enrollment) =>
-        enrollment.courseId === Number(selectedCourseId) &&
+        Number(enrollment.courseId) === Number(selectedCourseId) &&
         [0, 1, 3].includes(Number(enrollment.status))
     )
 
@@ -128,7 +130,7 @@ function StudentEnrollmentsPage() {
       const response = await fetch(`${API}/Enrollments/request`, {
         method: 'POST',
         headers: {
-          ...headers,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -157,12 +159,6 @@ function StudentEnrollmentsPage() {
       setRequesting(false)
     }
   }
-
-  // Enrollment counts
-  const activeEnrollments = enrollments.filter(
-    (enrollment) =>
-      enrollment.status === 0 || enrollment.status === 1
-  )
 
   // Search enrollment history
   const filteredEnrollments = enrollments.filter((enrollment) => {
@@ -212,6 +208,7 @@ function StudentEnrollmentsPage() {
         <p>
           Select a course to submit an enrollment request.
         </p>
+
         <p className="myclass">
           Your request will be reviewed by your Director.
         </p>
@@ -225,7 +222,8 @@ function StudentEnrollmentsPage() {
               setError('')
               setSuccess('')
             }}
-            disabled={activeEnrollments.length >= 5}>
+            disabled={activeEnrollments.length >= 5}
+          >
             <option value="">Select a course</option>
 
             {courses
@@ -251,8 +249,9 @@ function StudentEnrollmentsPage() {
               requesting ||
               !selectedCourseId ||
               activeEnrollments.length >= 5
-            }>
-            {requesting ? 'Submitting...' : 'Request Enrollment' }
+            }
+          >
+            {requesting ? 'Submitting...' : 'Request Enrollment'}
           </button>
         </div>
 
@@ -321,7 +320,9 @@ function StudentEnrollmentsPage() {
                   </td>
 
                   <td>
-                    <span className={`enrollment-status enrollment-status-${Number(enrollment.status)}`}>
+                    <span
+                      className={`enrollment-status enrollment-status-${Number(enrollment.status)}`}
+                    >
                       {enrollmentStatuses[enrollment.status] ?? 'Unknown'}
                     </span>
                   </td>
