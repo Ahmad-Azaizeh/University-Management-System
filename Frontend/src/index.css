@@ -2849,8 +2849,8 @@ body,
 
 .director-stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
 }
 
 .director-stat-card {
@@ -3818,5 +3818,169 @@ body,
     gap: 10px;
   }
 }
+
+
+
+/* Director Dashboard */
+
+.director-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: 100%;
+  padding: 30px;
+  color: #172b4d;
+}
+
+/* Header */
+
+.director-dashboard-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.director-dashboard-header h2 {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 700;
+  color: #172b4d;
+}
+
+.director-dashboard-header p {
+  margin: 0;
+  color: #718096;
+  font-size: 14px;
+}
+
+/* Statistics grid: two cards per row */
+
+.director-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.director-stat-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  min-height: 145px;
+  padding: 25px;
+  background: #ffffff;
+  border: 1px solid #e8edf5;
+  border-radius: 14px;
+  box-shadow: 0 3px 12px rgba(25, 42, 70, 0.04);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.director-stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(25, 42, 70, 0.08);
+}
+
+.director-stat-card p {
+  margin: 0;
+  color: #718096;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.director-stat-card h3 {
+  margin: 0;
+  color: #172b4d;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+
+/* Average grade: full-width featured card */
+
+.director-stat-card:last-child {
+  grid-column: 1 / -1;
+  min-height: 130px;
+  background: #203b63;
+  border: none;
+}
+
+.director-stat-card:last-child p {
+  color: #c4d3e6;
+}
+
+.director-stat-card:last-child h3 {
+  color: #ffffff;
+  font-size: 40px;
+}
+
+/* Existing dashboard tables, if used */
+
+.director-dashboard-courses {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #e8edf5;
+  border-radius: 14px;
+}
+
+.director-dashboard-courses h3 {
+  margin: 0;
+  color: #172b4d;
+  font-size: 18px;
+}
+
+.director-dashboard-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.director-dashboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.director-dashboard-table th {
+  padding: 14px 16px;
+  background: #f5f7fb;
+  color: #718096;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.director-dashboard-table td {
+  padding: 16px;
+  border-bottom: 1px solid #edf1f6;
+  color: #334155;
+  font-size: 14px;
+}
+
+/* Responsive */
+
+@media (max-width: 600px) {
+  .director-dashboard {
+    padding: 18px;
+    gap: 20px;
+  }
+
+  .director-stats-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .director-stat-card {
+    min-height: 115px;
+    padding: 20px;
+  }
+
+  .director-stat-card:last-child {
+    grid-column: auto;
+  }
+}
+
+
 
 

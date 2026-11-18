@@ -40,7 +40,7 @@ namespace UMS.Application.Services
         {
             var user = await GetAuthorizedUserAsync(currentUserId);
 
-            var enrollments = await _enrollmentRepository.GetAllAsync(
+            var enrollments = _enrollmentRepository.GetQueryable(
                 "Student.User",
                 "Course"
             );
@@ -48,33 +48,29 @@ namespace UMS.Application.Services
             if (user.Role == UserRole.Director)
             {
                 var schoolId = await GetDirectorSchoolIdAsync(user.Id);
-                var students = await _studentRepository.GetAllAsync();
-
-                var studentIds = students
-                    .Where(s => s.SchoolId == schoolId)
-                    .Select(s => s.Id)
-                    .ToHashSet();
 
                 enrollments = enrollments.Where(e =>
-                    studentIds.Contains(e.StudentId) &&
+                    e.Student.SchoolId == schoolId &&
                     e.Course.SchoolId == schoolId);
             }
 
-            return enrollments.Select(e => new EnrollmentDto
-            {
-                Id = e.Id,
-                StudentId = e.StudentId,
-                StudentName = e.Student.User.FullName,
-                StudentNumber = e.Student.StudentNumber,
-                CourseId = e.CourseId,
-                CourseName = e.Course.Name,
-                CourseCode = e.Course.Code,
-                EnrollmentDate = e.EnrollmentDate,
-                Grade = e.Grade,
-                Status = e.Status,
-                DecisionDate = e.DecisionDate,
-                CompletedAt = e.CompletedAt
-            });
+            return await enrollments
+                .Select(e => new EnrollmentDto
+                {
+                    Id = e.Id,
+                    StudentId = e.StudentId,
+                    StudentName = e.Student.User.FullName,
+                    StudentNumber = e.Student.StudentNumber,
+                    CourseId = e.CourseId,
+                    CourseName = e.Course.Name,
+                    CourseCode = e.Course.Code,
+                    EnrollmentDate = e.EnrollmentDate,
+                    Grade = e.Grade,
+                    Status = e.Status,
+                    DecisionDate = e.DecisionDate,
+                    CompletedAt = e.CompletedAt
+                })
+                .ToListAsync();
         }
 
 
@@ -101,15 +97,8 @@ namespace UMS.Application.Services
             {
                 var directorSchoolId = await GetDirectorSchoolIdAsync(user.Id);
 
-                var students = await _studentRepository.GetAllAsync();
-
-                var studentIds = students
-                    .Where(s => s.SchoolId == directorSchoolId)
-                    .Select(s => s.Id)
-                    .ToHashSet();
-
                 enrollments = enrollments.Where(e =>
-                    studentIds.Contains(e.StudentId) &&
+                    e.Student.SchoolId == directorSchoolId &&
                     e.Course.SchoolId == directorSchoolId);
             }
             else if (schoolId.HasValue)
@@ -201,8 +190,8 @@ namespace UMS.Application.Services
         {
             var user = await GetAuthorizedUserAsync(currentUserId);
 
-            var students = await _studentRepository.GetAllAsync("User");
-            var student = students.FirstOrDefault(s => s.Id == dto.StudentId);
+            var student = await _studentRepository.GetQueryable("User")
+                .FirstOrDefaultAsync(s => s.Id == dto.StudentId);
 
             if (student == null)
                 throw new ArgumentException("Student does not exist.");
@@ -221,27 +210,25 @@ namespace UMS.Application.Services
                         "You can only enroll students in courses within your school.");
             }
 
-            var enrollments = await _enrollmentRepository.GetAllAsync();
-
-            var studentEnrollments = enrollments
-                .Where(e => e.StudentId == student.Id)
-                .ToList();
-
-            var activeCount = studentEnrollments.Count(e =>
-                e.Status == EnrollmentStatus.Pending ||
-                e.Status == EnrollmentStatus.Approved);
+            var activeCount = await _enrollmentRepository.GetQueryable()
+                .CountAsync(e =>
+                    e.StudentId == student.Id &&
+                    (e.Status == EnrollmentStatus.Pending ||
+                     e.Status == EnrollmentStatus.Approved));
 
             if (activeCount >= 5)
                 throw new ArgumentException(
                     "This student already has five active enrollments.");
 
-            var existingEnrollment = studentEnrollments.FirstOrDefault(e =>
-                e.CourseId == course.Id &&
-                (e.Status == EnrollmentStatus.Pending ||
-                 e.Status == EnrollmentStatus.Approved ||
-                 e.Status == EnrollmentStatus.Completed));
+            var existingEnrollment = await _enrollmentRepository.GetQueryable()
+                .AnyAsync(e =>
+                    e.StudentId == student.Id &&
+                    e.CourseId == course.Id &&
+                    (e.Status == EnrollmentStatus.Pending ||
+                     e.Status == EnrollmentStatus.Approved ||
+                     e.Status == EnrollmentStatus.Completed));
 
-            if (existingEnrollment != null)
+            if (existingEnrollment)
                 throw new ArgumentException(
                     "This student already has an enrollment for this course.");
 
@@ -305,10 +292,12 @@ namespace UMS.Application.Services
             }
             else if (user.Role == UserRole.Professor)
             {
-                var professors = await _professorRepository.GetAllAsync();
+                var professor = await _professorRepository.GetQueryable()
+                    .FirstOrDefaultAsync(p => p.UserId == user.Id);
 
-                var professor = professors.FirstOrDefault(
-                    p => p.UserId == user.Id);
+                if (professor == null)
+                    throw new UnauthorizedAccessException(
+                        "Professor profile not found.");
 
                 if (professor == null)
                     throw new UnauthorizedAccessException(
@@ -391,44 +380,33 @@ namespace UMS.Application.Services
             }
             else if (user.Role == UserRole.Professor)
             {
-                var professors = await _professorRepository.GetAllAsync();
+                var professorId = await _professorRepository.GetQueryable()
+                    .Where(p => p.UserId == user.Id)
+                    .Select(p => (int?)p.Id)
+                    .FirstOrDefaultAsync();
 
-                var professor = professors.FirstOrDefault(
-                    p => p.UserId == user.Id);
-
-                if (professor == null || course.ProfessorId != professor.Id)
+                if (professorId == null || course.ProfessorId != professorId.Value)
                     throw new UnauthorizedAccessException(
                         "You can only view students in your assigned courses.");
             }
 
-            var enrollments = await _enrollmentRepository.GetAllAsync();
-            var students = await _studentRepository.GetAllAsync("User");
-
-            var studentsById = students.ToDictionary(s => s.Id);
-
-            return enrollments
+            return await _enrollmentRepository.GetQueryable()
                 .Where(e =>
                     e.CourseId == courseId &&
-                    studentsById.ContainsKey(e.StudentId) &&
                     (e.Status == EnrollmentStatus.Approved ||
                      e.Status == EnrollmentStatus.Completed ||
                      e.Status == EnrollmentStatus.Failed))
-                .Select(e =>
+                .Select(e => new CourseStudentDto
                 {
-                    var student = studentsById[e.StudentId];
-
-                    return new CourseStudentDto
-                    {
-                        EnrollmentId = e.Id,
-                        FullName = student.User.FullName,
-                        StudentNumber = student.StudentNumber,
-                        Grade = e.Grade,
-                        Status = e.Status,
-                        EnrollmentDate = e.EnrollmentDate,
-                        CompletedAt = e.CompletedAt
-                    };
+                    EnrollmentId = e.Id,
+                    FullName = e.Student.User.FullName,
+                    StudentNumber = e.Student.StudentNumber,
+                    Grade = e.Grade,
+                    Status = e.Status,
+                    EnrollmentDate = e.EnrollmentDate,
+                    CompletedAt = e.CompletedAt
                 })
-                .ToList();
+                .ToListAsync();
         }
 
 
@@ -441,8 +419,8 @@ namespace UMS.Application.Services
                 throw new UnauthorizedAccessException(
                     "Only students can submit enrollment requests.");
 
-            var students = await _studentRepository.GetAllAsync();
-            var student = students.FirstOrDefault(s => s.UserId == user.Id);
+            var student = await _studentRepository.GetQueryable()
+                .FirstOrDefaultAsync(s => s.UserId == user.Id);
 
             if (student == null)
                 throw new UnauthorizedAccessException("Student profile not found.");
@@ -456,43 +434,36 @@ namespace UMS.Application.Services
                 throw new UnauthorizedAccessException(
                     "You can only request courses within your school.");
 
-            var enrollments = await _enrollmentRepository.GetAllAsync();
-
-            var studentEnrollments = enrollments
-                .Where(e => e.StudentId == student.Id)
-                .ToList();
-
-            
-            var activeCount = studentEnrollments.Count(e =>
-                e.Status == EnrollmentStatus.Pending ||
-                e.Status == EnrollmentStatus.Approved);
+            var activeCount = await _enrollmentRepository.GetQueryable()
+                .CountAsync(e =>
+                    e.StudentId == student.Id &&
+                    (e.Status == EnrollmentStatus.Pending ||
+                     e.Status == EnrollmentStatus.Approved));
 
             if (activeCount >= 5)
                 throw new ArgumentException(
                     "You cannot have more than five active enrollments.");
 
-            
-            var existingEnrollment = enrollments.FirstOrDefault(e =>
-                e.StudentId == student.Id &&
-                e.CourseId == dto.CourseId &&
-                (e.Status == EnrollmentStatus.Pending ||
-                 e.Status == EnrollmentStatus.Approved ||
-                 e.Status == EnrollmentStatus.Completed));
+            var existingEnrollment = await _enrollmentRepository.GetQueryable()
+                .AnyAsync(e =>
+                    e.StudentId == student.Id &&
+                    e.CourseId == dto.CourseId &&
+                    (e.Status == EnrollmentStatus.Pending ||
+                     e.Status == EnrollmentStatus.Approved ||
+                     e.Status == EnrollmentStatus.Completed));
 
-            if (existingEnrollment != null)
-            {
+            if (existingEnrollment)
                 throw new InvalidOperationException(
                     "You already enrolled this course.");
-            }
 
-            
-            var recentDecline = studentEnrollments
+            var recentDecline = await _enrollmentRepository.GetQueryable()
                 .Where(e =>
+                    e.StudentId == student.Id &&
                     e.CourseId == dto.CourseId &&
                     e.Status == EnrollmentStatus.Declined &&
                     e.DecisionDate.HasValue)
                 .OrderByDescending(e => e.DecisionDate)
-                .FirstOrDefault();
+                .FirstOrDefaultAsync();
 
             if (recentDecline != null &&
                 recentDecline.DecisionDate!.Value.AddMonths(3) > DateTime.UtcNow)
@@ -541,8 +512,8 @@ namespace UMS.Application.Services
                 throw new UnauthorizedAccessException(
                     "Only students can view their own enrollments.");
 
-            var students = await _studentRepository.GetAllAsync();
-            var student = students.FirstOrDefault(s => s.UserId == user.Id);
+            var student = await _studentRepository.GetQueryable()
+                .FirstOrDefaultAsync(s => s.UserId == user.Id);
 
             if (student == null)
                 throw new UnauthorizedAccessException("Student profile not found.");
@@ -669,16 +640,16 @@ namespace UMS.Application.Services
 
         private async Task<int> GetDirectorSchoolIdAsync(int directorUserId)
         {
-            var schools = await _schoolRepository.GetAllAsync();
+            var schoolId = await _schoolRepository.GetQueryable()
+                .Where(s => s.DirectorUserId == directorUserId)
+                .Select(s => (int?)s.Id)
+                .FirstOrDefaultAsync();
 
-            var school = schools.FirstOrDefault(
-                s => s.DirectorUserId == directorUserId);
-
-            if (school == null)
+            if (schoolId == null)
                 throw new UnauthorizedAccessException(
                     "This director is not assigned to a school.");
 
-            return school.Id;
+            return schoolId.Value;
         }
 
 
@@ -701,23 +672,24 @@ namespace UMS.Application.Services
         }
 
 
-        private async Task EnsureEnrollmentAccessAsync(
-            Enrollment enrollment, User user)
+        private async Task EnsureEnrollmentAccessAsync(Enrollment enrollment, User user)
         {
             if (user.Role != UserRole.Director)
                 return;
 
             var schoolId = await GetDirectorSchoolIdAsync(user.Id);
-            var student = await _studentRepository.GetByIdAsync(enrollment.StudentId);
-            var course = await _courseRepository.GetByIdAsync(enrollment.CourseId);
 
-            if (student == null || course == null ||
-                student.SchoolId != schoolId ||
-                course.SchoolId != schoolId)
-            {
+            var hasAccess = await _enrollmentRepository.GetQueryable(
+                "Student",
+                "Course"
+            ).AnyAsync(e =>
+                e.Id == enrollment.Id &&
+                e.Student.SchoolId == schoolId &&
+                e.Course.SchoolId == schoolId);
+
+            if (!hasAccess)
                 throw new UnauthorizedAccessException(
                     "You cannot access enrollments outside your school.");
-            }
         }
     }
 }

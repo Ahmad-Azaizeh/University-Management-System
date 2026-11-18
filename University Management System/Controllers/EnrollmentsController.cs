@@ -99,7 +99,7 @@ namespace University_Management_System.Controllers
             }
         }
 
-        [Authorize(Roles = "President, Director, Professor")]
+        [Authorize(Roles = "President,Director,Professor")]
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, UpdateEnrollmentDto dto)
         {

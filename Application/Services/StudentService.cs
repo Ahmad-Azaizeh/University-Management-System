@@ -34,7 +34,7 @@ namespace UMS.Application.Services
         {
             var user = await GetAuthorizedUserAsync(currentUserId);
 
-            var students = await _studentRepository.GetAllAsync(
+            var students = _studentRepository.GetQueryable(
                 "User",
                 "School",
                 "Enrollments.Course");
@@ -45,7 +45,7 @@ namespace UMS.Application.Services
                 students = students.Where(s => s.SchoolId == schoolId);
             }
 
-            return students.Select(s => new StudentDto
+            return await students.Select(s => new StudentDto
             {
                 Id = s.Id,
                 UserId = s.UserId,
@@ -63,7 +63,7 @@ namespace UMS.Application.Services
                     Grade = e.Grade,
                     Status = e.Status
                 }).ToList()
-            });
+            }).ToListAsync();
         }
 
 
@@ -204,13 +204,17 @@ namespace UMS.Application.Services
             if (school == null)
                 throw new ArgumentException("School does not exist.");
 
-            var students = await _studentRepository.GetAllAsync();
+            var userAlreadyHasProfile = await _studentRepository.GetQueryable()
+                .AnyAsync(s => s.UserId == dto.UserId);
 
-            if (students.Any(s => s.UserId == dto.UserId))
+            if (userAlreadyHasProfile)
                 throw new ArgumentException(
                     "This user already has a student profile.");
 
-            if (students.Any(s => s.StudentNumber == dto.StudentNumber))
+            var studentNumberExists = await _studentRepository.GetQueryable()
+                .AnyAsync(s => s.StudentNumber == dto.StudentNumber);
+
+            if (studentNumberExists)
                 throw new ArgumentException(
                     "A student with this number already exists.");
 
@@ -313,14 +317,11 @@ namespace UMS.Application.Services
                 throw new UnauthorizedAccessException(
                     "Only students can access this dashboard.");
 
-            var students = await _studentRepository.GetAllAsync(
+            var student = await _studentRepository.GetQueryable(
                 "User",
                 "School",
-                "Enrollments.Course.Professor.User"
-            );
-
-            var student = students.FirstOrDefault(
-                s => s.UserId == currentUserId);
+                "Enrollments.Course.Professor.User")
+            .FirstOrDefaultAsync(s => s.UserId == currentUserId);
 
             if (student == null)
                 return null;
@@ -372,16 +373,16 @@ namespace UMS.Application.Services
 
         private async Task<int> GetDirectorSchoolIdAsync(int directorUserId)
         {
-            var schools = await _schoolRepository.GetAllAsync();
+            var schoolId = await _schoolRepository.GetQueryable()
+                .Where(s => s.DirectorUserId == directorUserId)
+                .Select(s => (int?)s.Id)
+                .FirstOrDefaultAsync();
 
-            var school = schools.FirstOrDefault(
-                s => s.DirectorUserId == directorUserId);
-
-            if (school == null)
+            if (schoolId == null)
                 throw new UnauthorizedAccessException(
                     "This director is not assigned to a school.");
 
-            return school.Id;
+            return schoolId.Value;
         }
     }
 }

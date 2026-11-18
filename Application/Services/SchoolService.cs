@@ -8,6 +8,7 @@ using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
 using UMS.Domain.Entities;
 using UMS.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace UMS.Application.Services
 {
@@ -114,16 +115,22 @@ namespace UMS.Application.Services
             }
 
 
-            var schools = await _schoolRepository.GetAllAsync();
-            if (schools.Any(s => s.DirectorUserId == dto.DirectorUserId))
+            var directorAlreadyAssigned = await _schoolRepository.GetQueryable()
+                .AnyAsync(s => s.DirectorUserId == dto.DirectorUserId);
+
+            if (directorAlreadyAssigned)
             {
                 throw new ArgumentException(
                     "This director is already assigned to a school.");
             }
 
-            if (schools.Any(s => s.Name == dto.Name))
+            var schoolNameExists = await _schoolRepository.GetQueryable()
+                .AnyAsync(s => s.Name == dto.Name);
+
+            if (schoolNameExists)
             {
-                throw new ArgumentException("A school with this name already exists");
+                throw new ArgumentException(
+                    "A school with this name already exists");
             }
 
 
@@ -166,17 +173,22 @@ namespace UMS.Application.Services
                 throw new ArgumentException("The specified user is not a director");
             }
 
-            var schools = await _schoolRepository.GetAllAsync();
+            var directorAlreadyAssigned = await _schoolRepository.GetQueryable()
+                .AnyAsync(s => s.DirectorUserId == dto.DirectorUserId && s.Id != id);
 
-            if (schools.Any(s => s.DirectorUserId == dto.DirectorUserId && s.Id != id))
+            if (directorAlreadyAssigned)
             {
                 throw new ArgumentException(
                     "This director is already assigned to another school.");
             }
 
-            if (schools.Any(s => s.Name == dto.Name && s.Id != id))
+            var schoolNameExists = await _schoolRepository.GetQueryable()
+                .AnyAsync(s => s.Name == dto.Name && s.Id != id);
+
+            if (schoolNameExists)
             {
-                throw new ArgumentException("A school with the this name already exists");
+                throw new ArgumentException(
+                    "A school with the this name already exists");
             }
 
             school.Name = dto.Name;
@@ -196,19 +208,24 @@ namespace UMS.Application.Services
             if (school == null)
                 return false;
 
-            var students = await _studentRepository.GetAllAsync();
-            var professors = await _professorRepository.GetAllAsync();
-            var courses = await _courseRepository.GetAllAsync();
+            var hasStudents = await _studentRepository.GetQueryable()
+                .AnyAsync(s => s.SchoolId == id);
 
-            if (students.Any(s => s.SchoolId == id))
+            if (hasStudents)
                 throw new ArgumentException(
                     "Cannot delete a school that has students.");
 
-            if (professors.Any(p => p.SchoolId == id))
+            var hasProfessors = await _professorRepository.GetQueryable()
+                .AnyAsync(p => p.SchoolId == id);
+
+            if (hasProfessors)
                 throw new ArgumentException(
                     "Cannot delete a school that has professors.");
 
-            if (courses.Any(c => c.SchoolId == id))
+            var hasCourses = await _courseRepository.GetQueryable()
+                .AnyAsync(c => c.SchoolId == id);
+
+            if (hasCourses)
                 throw new ArgumentException(
                     "Cannot delete a school that has courses.");
 

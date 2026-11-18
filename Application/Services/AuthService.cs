@@ -10,6 +10,7 @@ using UMS.Application.DTOs.Auth;
 using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
 using UMS.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace UMS.Application.Services
 {
@@ -31,13 +32,8 @@ namespace UMS.Application.Services
 
         public async Task<AuthResultDto> LoginAsync(LoginDto dto)
         {
-            var users = await _userRepository.GetAllAsync();
-
-            var user = users.FirstOrDefault(u =>
-                string.Equals(
-                    u.LoginId,
-                    dto.LoginId.Trim(),
-                    StringComparison.OrdinalIgnoreCase));
+            var user = await _userRepository.GetQueryable()
+                .FirstOrDefaultAsync(u => u.LoginId == dto.LoginId.Trim());
 
             if (user == null)
                 return null;

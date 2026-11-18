@@ -39,50 +39,49 @@ namespace UMS.Application.Services
         {
             var user = await GetAuthorizedCourseViewerAsync(currentUserId);
 
-            var courses = await _courseRepository.GetAllAsync(
-                "School",
-                "Professor.User"
-            );
-
-            var enrollments = await _enrollmentRepository.GetAllAsync();
+            var courses = _courseRepository.GetQueryable();
 
             if (user.Role == UserRole.Director)
             {
-                var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+                var schoolId = await _schoolRepository.GetQueryable()
+                    .Where(s => s.DirectorUserId == user.Id)
+                    .Select(s => (int?)s.Id)
+                    .FirstOrDefaultAsync();
 
-                courses = courses.Where(c => c.SchoolId == schoolId);
+                if (schoolId == null)
+                    throw new UnauthorizedAccessException(
+                        "This director is not assigned to a school.");
+
+                courses = courses.Where(c => c.SchoolId == schoolId.Value);
             }
             else if (user.Role == UserRole.Professor)
             {
-                var professors = await _professorRepository.GetAllAsync();
+                var professorId = await _professorRepository.GetQueryable()
+                    .Where(p => p.UserId == user.Id)
+                    .Select(p => (int?)p.Id)
+                    .FirstOrDefaultAsync();
 
-                var professor = professors.FirstOrDefault(
-                    p => p.UserId == user.Id);
-
-                if (professor == null)
+                if (professorId == null)
                     throw new UnauthorizedAccessException(
                         "Professor profile not found.");
 
-                courses = courses.Where(
-                    c => c.ProfessorId == professor.Id);
+                courses = courses.Where(c => c.ProfessorId == professorId.Value);
             }
-
             else if (user.Role == UserRole.Student)
             {
-                var students = await _studentRepository.GetAllAsync();
+                var schoolId = await _studentRepository.GetQueryable()
+                    .Where(s => s.UserId == user.Id)
+                    .Select(s => (int?)s.SchoolId)
+                    .FirstOrDefaultAsync();
 
-                var student = students.FirstOrDefault(
-                    s => s.UserId == user.Id);
-
-                if (student == null)
+                if (schoolId == null)
                     throw new UnauthorizedAccessException(
                         "Student profile not found.");
 
-                courses = courses.Where(
-                    c => c.SchoolId == student.SchoolId);
+                courses = courses.Where(c => c.SchoolId == schoolId.Value);
             }
 
-            return courses.Select(c => new CourseDto
+            return await courses.Select(c => new CourseDto
             {
                 Id = c.Id,
                 Name = c.Name,
@@ -93,8 +92,10 @@ namespace UMS.Application.Services
                 ProfessorName = c.Professor == null
                     ? null
                     : c.Professor.User.FullName,
-                StudentCount = enrollments.Count(e => e.CourseId == c.Id)
-            });
+
+                StudentCount = _enrollmentRepository.GetQueryable()
+                    .Count(e => e.CourseId == c.Id)
+            }).ToListAsync();
         }
 
 
@@ -123,31 +124,29 @@ namespace UMS.Application.Services
             }
             else if (user.Role == UserRole.Professor)
             {
-                var professors = await _professorRepository.GetAllAsync();
+                var professorId = await _professorRepository.GetQueryable()
+                    .Where(p => p.UserId == user.Id)
+                    .Select(p => (int?)p.Id)
+                    .FirstOrDefaultAsync();
 
-                var professor = professors.FirstOrDefault(
-                    p => p.UserId == user.Id
-                );
-
-                if (professor == null)
+                if (professorId == null)
                     throw new UnauthorizedAccessException(
                         "Professor profile not found.");
 
-                courses = courses.Where(c => c.ProfessorId == professor.Id);
+                courses = courses.Where(c => c.ProfessorId == professorId.Value);
             }
             else if (user.Role == UserRole.Student)
             {
-                var students = await _studentRepository.GetAllAsync();
+                var studentSchoolId = await _studentRepository.GetQueryable()
+                    .Where(s => s.UserId == user.Id)
+                    .Select(s => (int?)s.SchoolId)
+                    .FirstOrDefaultAsync();
 
-                var student = students.FirstOrDefault(
-                    s => s.UserId == user.Id
-                );
-
-                if (student == null)
+                if (studentSchoolId == null)
                     throw new UnauthorizedAccessException(
                         "Student profile not found.");
 
-                courses = courses.Where(c => c.SchoolId == student.SchoolId);
+                courses = courses.Where(c => c.SchoolId == studentSchoolId.Value);
             }
             else if (user.Role == UserRole.President && schoolId.HasValue)
             {
@@ -265,9 +264,10 @@ namespace UMS.Application.Services
                         "Professor must belong to the course's school.");
             }
 
-            var courses = await _courseRepository.GetAllAsync();
+            var codeExists = await _courseRepository.GetQueryable()
+                .AnyAsync(c => c.Code == dto.Code);
 
-            if (courses.Any(c => c.Code == dto.Code))
+            if (codeExists)
                 throw new ArgumentException(
                     "A course with this code already exists.");
 
@@ -336,9 +336,10 @@ namespace UMS.Application.Services
                         "Professor must belong to the course's school.");
             }
 
-            var courses = await _courseRepository.GetAllAsync();
+            var codeExists = await _courseRepository.GetQueryable()
+                .AnyAsync(c => c.Id != id && c.Code == dto.Code);
 
-            if (courses.Any(c => c.Id != id && c.Code == dto.Code))
+            if (codeExists)
                 throw new ArgumentException(
                     "A course with this code already exists.");
 
@@ -370,9 +371,10 @@ namespace UMS.Application.Services
                         "You cannot delete courses from another school.");
             }
 
-            var enrollments = await _enrollmentRepository.GetAllAsync();
+            var hasEnrollments = await _enrollmentRepository.GetQueryable()
+                .AnyAsync(e => e.CourseId == id);
 
-            if (enrollments.Any(e => e.CourseId == id))
+            if (hasEnrollments)
                 throw new ArgumentException(
                     "Cannot delete a course that has student enrollments.");
 
@@ -402,16 +404,16 @@ namespace UMS.Application.Services
 
         private async Task<int> GetDirectorSchoolIdAsync(int directorUserId)
         {
-            var schools = await _schoolRepository.GetAllAsync();
+            var schoolId = await _schoolRepository.GetQueryable()
+                .Where(s => s.DirectorUserId == directorUserId)
+                .Select(s => (int?)s.Id)
+                .FirstOrDefaultAsync();
 
-            var school = schools.FirstOrDefault(
-                s => s.DirectorUserId == directorUserId);
-
-            if (school == null)
+            if (schoolId == null)
                 throw new UnauthorizedAccessException(
                     "This director is not assigned to a school.");
 
-            return school.Id;
+            return schoolId.Value;
         }
 
 

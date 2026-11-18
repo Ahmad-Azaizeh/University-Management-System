@@ -135,10 +135,7 @@ namespace University_Management_System.Controllers
         {
             try
             {
-                var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-                if (!int.TryParse(currentUserId, out var authenticatedUserId))
-                    return Unauthorized();
+                var authenticatedUserId = GetCurrentUserId();
 
                 if (authenticatedUserId != id)
                     return Forbid();
@@ -159,7 +156,7 @@ namespace University_Management_System.Controllers
             }
             catch (UnauthorizedAccessException)
             {
-                return Forbid();
+                return Unauthorized();
             }
         }
 
@@ -167,10 +164,11 @@ namespace University_Management_System.Controllers
         [HttpPut("me/profile")]
         public async Task<IActionResult> UpdateOwnProfile(UpdateOwnProfileDto dto)
         {
-            var currentUserId = GetCurrentUserId();
-
+            
             try
             {
+                var currentUserId = GetCurrentUserId();
+
                 var updated = await _userService.UpdateOwnProfileAsync(
                     currentUserId, dto);
 
@@ -182,6 +180,10 @@ namespace University_Management_System.Controllers
             catch (ArgumentException ex)
             {
                 return BadRequest(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Unauthorized();
             }
         }
 

@@ -33,19 +33,16 @@ namespace UMS.Application.Services
         {
             var user = await GetAuthorizedUserAsync(currentUserId);
 
-            var professors = await _professorRepository.GetAllAsync(
-                "User",
-                "School",
-                "Courses"
-            );
+            var professors = _professorRepository.GetQueryable();
 
             if (user.Role == UserRole.Director)
             {
                 var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+
                 professors = professors.Where(p => p.SchoolId == schoolId);
             }
 
-            return professors.Select(p => new ProfessorDto
+            return await professors.Select(p => new ProfessorDto
             {
                 Id = p.Id,
                 UserId = p.UserId,
@@ -53,12 +50,13 @@ namespace UMS.Application.Services
                 EmployeeNumber = p.EmployeeNumber,
                 SchoolId = p.SchoolId,
                 SchoolName = p.School.Name,
-                CourseCount = p.Courses.Count
-            });
+                CourseCount = p.Courses.Count()
+            }).ToListAsync();
         }
 
 
-        public async Task<PagedResultDto<ProfessorDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize, string? searchTerm = null, int? schoolId = null)
+        public async Task<PagedResultDto<ProfessorDto>> GetAllPagedAsync(int currentUserId, 
+            int pageNumber, int pageSize, string? searchTerm = null, int? schoolId = null)
         {
             pageNumber = Math.Max(1, pageNumber);
             pageSize = Math.Clamp(pageSize, 1, 100);
@@ -174,13 +172,17 @@ namespace UMS.Application.Services
             if (school == null)
                 throw new ArgumentException("School does not exist.");
 
-            var professors = await _professorRepository.GetAllAsync();
+            var userAlreadyHasProfile = await _professorRepository.GetQueryable()
+                .AnyAsync(p => p.UserId == dto.UserId);
 
-            if (professors.Any(p => p.UserId == dto.UserId))
+            if (userAlreadyHasProfile)
                 throw new ArgumentException(
                     "This user already has a professor profile.");
 
-            if (professors.Any(p => p.EmployeeNumber == dto.EmployeeNumber))
+            var employeeNumberExists = await _professorRepository.GetQueryable()
+                .AnyAsync(p => p.EmployeeNumber == dto.EmployeeNumber);
+
+            if (employeeNumberExists)
                 throw new ArgumentException(
                     "Employee number already exists.");
 
@@ -257,9 +259,10 @@ namespace UMS.Application.Services
                         "You cannot delete professors from another school.");
             }
 
-            var courses = await _courseRepository.GetAllAsync();
+            var hasCourses = await _courseRepository.GetQueryable()
+                .AnyAsync(c => c.ProfessorId == id);
 
-            if (courses.Any(c => c.ProfessorId == id))
+            if (hasCourses)
                 throw new ArgumentException(
                     "Cannot delete a professor who is assigned to a course.");
 
@@ -299,16 +302,16 @@ namespace UMS.Application.Services
 
         private async Task<int> GetDirectorSchoolIdAsync(int directorUserId)
         {
-            var schools = await _schoolRepository.GetAllAsync();
+            var schoolId = await _schoolRepository.GetQueryable()
+                .Where(s => s.DirectorUserId == directorUserId)
+                .Select(s => (int?)s.Id)
+                .FirstOrDefaultAsync();
 
-            var school = schools.FirstOrDefault(
-                s => s.DirectorUserId == directorUserId);
-
-            if (school == null)
+            if (schoolId == null)
                 throw new UnauthorizedAccessException(
                     "This director is not assigned to a school.");
 
-            return school.Id;
+            return schoolId.Value;
         }
     }
 }

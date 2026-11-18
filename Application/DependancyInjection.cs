@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using UMS.Application.Interfaces.IServices;
 using UMS.Application.Interfaces.Services;
 using UMS.Application.Services;
 using UMS.Domain.Entities;
@@ -19,6 +20,7 @@ namespace UMS.Application
             services.AddScoped<ICourseService, CourseService>();
             services.AddScoped<IEnrollmentService, EnrollmentService>();
             services.AddScoped<IUserService, UserService>();
+            services.AddScoped<IDashboardService, DashboardService>();
             services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
             services.AddScoped<IAuthService, AuthService>();
             

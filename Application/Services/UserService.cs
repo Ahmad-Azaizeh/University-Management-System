@@ -9,6 +9,7 @@ using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
 using UMS.Domain.Entities;
 using UMS.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace UMS.Application.Services
 {
@@ -117,7 +118,6 @@ namespace UMS.Application.Services
                     "You are not authorized to create users.");
             }
 
-
             if (dto.Role == UserRole.President)
                 throw new UnauthorizedAccessException(
                     "A President account cannot be created through user management.");
@@ -126,10 +126,12 @@ namespace UMS.Application.Services
 
             if (currentUser.Role == UserRole.Director)
             {
-                var directorSchool = (await _schoolRepository.GetAllAsync())
-                    .FirstOrDefault(s => s.DirectorUserId == currentUser.Id);
+                var directorSchoolId = await _schoolRepository.GetQueryable()
+                    .Where(s => s.DirectorUserId == currentUser.Id)
+                    .Select(s => (int?)s.Id)
+                    .FirstOrDefaultAsync();
 
-                if (directorSchool == null)
+                if (directorSchoolId == null)
                     throw new InvalidOperationException(
                         "The Director is not assigned to a school.");
 
@@ -140,7 +142,7 @@ namespace UMS.Application.Services
                         "Directors can only create Student or Professor accounts.");
                 }
 
-                schoolId = directorSchool.Id;
+                schoolId = directorSchoolId.Value;
             }
             else
             {
@@ -164,40 +166,30 @@ namespace UMS.Application.Services
                 }
             }
 
-            var users = await _userRepository.GetAllAsync();
+            var loginIdExists = await _userRepository.GetQueryable()
+                .AnyAsync(u => u.LoginId == dto.LoginId);
 
-            if (users.Any(u => u.LoginId == dto.LoginId))
+            if (loginIdExists)
                 throw new ArgumentException("This LoginId is already in use.");
 
-            var students = await _studentRepository.GetAllAsync();
-            var professors = await _professorRepository.GetAllAsync();
-
-            if (dto.Role == UserRole.Student &&
-                students.Any(s => s.StudentNumber == dto.StudentNumber))
+            if (dto.Role == UserRole.Student)
             {
-                throw new ArgumentException(
-                    "This StudentNumber is already in use.");
+                var studentNumberExists = await _studentRepository.GetQueryable()
+                    .AnyAsync(s => s.StudentNumber == dto.StudentNumber);
+
+                if (studentNumberExists)
+                    throw new ArgumentException(
+                        "This StudentNumber is already in use.");
             }
 
-            if (dto.Role == UserRole.Professor &&
-                professors.Any(p => p.EmployeeNumber == dto.EmployeeNumber))
+            if (dto.Role == UserRole.Professor)
             {
-                throw new ArgumentException(
-                    "This EmployeeNumber is already in use.");
-            }
+                var employeeNumberExists = await _professorRepository.GetQueryable()
+                    .AnyAsync(p => p.EmployeeNumber == dto.EmployeeNumber);
 
-            if (dto.Role == UserRole.Student &&
-                string.IsNullOrWhiteSpace(dto.StudentNumber))
-            {
-                throw new ArgumentException(
-                    "StudentNumber is required for a Student account.");
-            }
-
-            if (dto.Role == UserRole.Professor &&
-                string.IsNullOrWhiteSpace(dto.EmployeeNumber))
-            {
-                throw new ArgumentException(
-                    "EmployeeNumber is required for a Professor account.");
+                if (employeeNumberExists)
+                    throw new ArgumentException(
+                        "This EmployeeNumber is already in use.");
             }
 
             var user = new User
@@ -362,14 +354,8 @@ namespace UMS.Application.Services
             if (string.IsNullOrWhiteSpace(loginId))
                 throw new ArgumentException("Login ID is required.");
 
-            var users = await _userRepository.GetAllAsync();
-
-            var loginIdExists = users.Any(u =>
-                u.Id != userId &&
-                string.Equals(
-                    u.LoginId,
-                    loginId,
-                    StringComparison.OrdinalIgnoreCase));
+            var loginIdExists = await _userRepository.GetQueryable()
+                .AnyAsync(u => u.Id != userId && u.LoginId == loginId);
 
             if (loginIdExists)
                 throw new ArgumentException("Login ID is already taken.");
@@ -386,29 +372,26 @@ namespace UMS.Application.Services
         {
             if (user.Role == UserRole.Director)
             {
-                var schools = await _schoolRepository.GetAllAsync();
-
-                return schools
+                return await _schoolRepository.GetQueryable()
                     .Where(s => s.DirectorUserId == user.Id)
-                    .Select(s => (int?)s.Id).FirstOrDefault();
+                    .Select(s => (int?)s.Id)
+                    .FirstOrDefaultAsync();
             }
 
             if (user.Role == UserRole.Student)
             {
-                var students = await _studentRepository.GetAllAsync();
-
-                return students
+                return await _studentRepository.GetQueryable()
                     .Where(s => s.UserId == user.Id)
-                    .Select(s => (int?)s.SchoolId).FirstOrDefault();
+                    .Select(s => (int?)s.SchoolId)
+                    .FirstOrDefaultAsync();
             }
 
             if (user.Role == UserRole.Professor)
             {
-                var professors = await _professorRepository.GetAllAsync();
-
-                return professors
+                return await _professorRepository.GetQueryable()
                     .Where(p => p.UserId == user.Id)
-                    .Select(p => (int?)p.SchoolId).FirstOrDefault();
+                    .Select(p => (int?)p.SchoolId)
+                    .FirstOrDefaultAsync();
             }
 
             return null;
