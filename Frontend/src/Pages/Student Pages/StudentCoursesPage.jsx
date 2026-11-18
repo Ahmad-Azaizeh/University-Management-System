@@ -10,7 +10,6 @@ function StudentCoursesPage() {
   const [student, setStudent] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [search, setSearch] = useState('')
 
   useEffect(() => {
     if (!token) return
@@ -47,15 +46,6 @@ function StudentCoursesPage() {
 
   const courses = student?.enrollments || []
 
-  const filteredCourses = courses.filter((course) => {
-    const value = search.toLowerCase()
-
-    return (
-      course.courseName?.toLowerCase().includes(value) ||
-      course.courseCode?.toLowerCase().includes(value)
-    )
-  })
-
   return (
     <div className="student-courses-page">
       <div className="student-courses-header">
@@ -86,20 +76,9 @@ function StudentCoursesPage() {
         </div>
       </div>
 
-      <div className="student-courses-toolbar">
-        <input
-          type="text"
-          placeholder="Search courses by name or code..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-
-        <span>{filteredCourses.length} results</span>
-      </div>
-
       <div className="student-courses-grid">
-        {filteredCourses.length > 0 ? (
-          filteredCourses.map((course) => (
+        {courses.length > 0 ? (
+          courses.map((course) => (
             <div
               className="student-course-card"
               key={course.enrollmentId}
@@ -109,35 +88,28 @@ function StudentCoursesPage() {
                   {course.courseCode}
                 </span>
 
-                <span
-                  className={
-                    course.grade === null
-                      ? 'student-course-pending'
-                      : 'student-course-graded'
-                  }
-                >
-                  {course.grade === null ? 'Pending' : 'Graded'}
+                <span className={`enrollment-status enrollment-status-${Number(course.status)}`}>
+                  {{
+                    0: 'Approved',
+                    1: 'Pending',
+                    2: 'Declined',
+                    3: 'Completed',
+                    4: 'Failed',
+                  }[Number(course.status)] ?? 'Unknown'}
                 </span>
               </div>
 
               <h3>{course.courseName}</h3>
 
-              <div className="student-course-card-footer">
-                <span>Current Grade</span>
-
-                <strong>
-                  {course.grade === null
-                    ? 'Not graded'
-                    : `${course.grade}%`}
-                </strong>
-              </div>
+               <div className="student-course-card-footer">
+                  <span>Professor</span>
+                  <p>{course.professorName || 'Not assigned'}</p>
+                </div>
             </div>
           ))
         ) : (
           <div className="student-courses-empty">
-            {courses.length === 0
-              ? 'You are not enrolled in any courses yet.'
-              : 'No courses match your search.'}
+            You are not enrolled in any courses yet.
           </div>
         )}
       </div>

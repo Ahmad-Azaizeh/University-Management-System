@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext.jsx'
 
 const API = 'https://localhost:7245/api'
 const PAGE_SIZE = 10
+const LOOKUP_PAGE_SIZE = 100
+const STUDENT_LOOKUP_PAGE_SIZE = 10
 
 const STATUS_OPTIONS = [
   { label: 'All', value: 'all' },
@@ -38,58 +40,50 @@ function formatDate(date) {
 }
 
 async function getErrorMessage(response, fallback) {
-  try {
-    const errorData = await response.json()
-    return errorData.message || fallback
-  } catch {
-    return fallback
-  }
+  const errorData = await response.json().catch(() => null)
+
+  return (
+    errorData?.message ||
+    errorData?.title ||
+    errorData?.detail ||
+    fallback
+  )
 }
 
-async function fetchEnrollmentData({
-  token,
-  pageNumber,
-  search,
-  selectedStatus,
-  selectedCourse,
-  selectedSchool,
-  isPresident,
-  signal,
-}) {
-  const hasFilters =
-    search.trim() !== '' ||
-    selectedStatus !== 'all' ||
-    selectedCourse !== 'all' ||
-    (isPresident && selectedSchool !== 'all')
+async function fetchAllPages(endpoint, token, signal) {
+  let allItems = []
+  let currentPage = 1
 
-  const endpoint = hasFilters
-    ? `${API}/Enrollments?paginated=false`
-    : `${API}/Enrollments?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`
+  while (true) {
+    const params = new URLSearchParams({
+      pageNumber: String(currentPage),
+      pageSize: String(LOOKUP_PAGE_SIZE),
+    })
 
-  const response = await fetch(endpoint, {
-    headers: getAuthHeaders(token),
-    signal,
-  })
+    const response = await fetch(
+      `${API}/${endpoint}?${params}`,
+      {
+        headers: getAuthHeaders(token),
+        signal,
+      }
+    )
 
-  if (!response.ok) {
-    throw new Error('Failed to load enrollments.')
-  }
-
-  const data = await response.json()
-
-  if (hasFilters) {
-    return {
-      items: data,
-      totalCount: data.length,
-      totalPages: 1,
+    if (!response.ok) {
+      throw new Error(`Failed to load ${endpoint.toLowerCase()}.`)
     }
+
+    const data = await response.json()
+
+    allItems = [...allItems, ...(data.items || [])]
+
+    if (currentPage >= (data.totalPages || 1)) {
+      break
+    }
+
+    currentPage += 1
   }
 
-  return {
-    items: data.items,
-    totalCount: data.totalCount,
-    totalPages: data.totalPages,
-  }
+  return allItems
 }
 
 function EnrollmentsPage() {
@@ -100,7 +94,8 @@ function EnrollmentsPage() {
     user?.role === 3 || user?.role === 'President'
 
   const [enrollments, setEnrollments] = useState([])
-  const [students, setStudents] = useState([])
+  const [studentResults, setStudentResults] = useState([])
+  const [studentResultsQuery, setStudentResultsQuery] = useState('')
   const [courses, setCourses] = useState([])
   const [schools, setSchools] = useState([])
 
@@ -108,15 +103,19 @@ function EnrollmentsPage() {
   const [totalPages, setTotalPages] = useState(1)
 
   const [loading, setLoading] = useState(true)
+  const [studentLookupLoading, setStudentLookupLoading] = useState(false)
   const [error, setError] = useState('')
   const [actionError, setActionError] = useState('')
+  const [studentLookupError, setStudentLookupError] = useState('')
 
   const [search, setSearch] = useState('')
+  const [activeSearch, setActiveSearch] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('all')
   const [selectedCourse, setSelectedCourse] = useState('all')
   const [selectedSchool, setSelectedSchool] = useState('all')
 
   const [pageNumber, setPageNumber] = useState(1)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const [showForm, setShowForm] = useState(false)
   const [studentId, setStudentId] = useState('')
@@ -126,13 +125,7 @@ function EnrollmentsPage() {
   const [studentSearch, setStudentSearch] = useState('')
   const [selectedStudent, setSelectedStudent] = useState(null)
 
-  const hasFilters =
-    search.trim() !== '' ||
-    selectedStatus !== 'all' ||
-    selectedCourse !== 'all' ||
-    (isPresident && selectedSchool !== 'all')
-
-  // Load reference data
+  // Load courses and schools for dropdowns
   useEffect(() => {
     if (!token) return
 
@@ -140,48 +133,28 @@ function EnrollmentsPage() {
 
     async function loadReferenceData() {
       try {
-        const headers = getAuthHeaders(token)
-
-        const requests = [
-          fetch(`${API}/Students?paginated=false`, {
-            headers,
-            signal: controller.signal,
-          }),
-          fetch(`${API}/Courses?paginated=false`, {
-            headers,
-            signal: controller.signal,
-          }),
-        ]
-
-        if (isPresident) {
-          requests.push(
-            fetch(`${API}/Schools`, {
-              headers,
-              signal: controller.signal,
-            })
-          )
-        }
-
-        const responses = await Promise.all(requests)
-
-        if (responses.some((response) => !response.ok)) {
-          throw new Error('Failed to load enrollment data.')
-        }
-
-        const data = await Promise.all(
-          responses.map((response) => response.json())
+        const coursesData = await fetchAllPages(
+          'Courses',
+          token,
+          controller.signal
         )
 
-        setStudents(data[0])
-        setCourses(data[1])
+        setCourses(coursesData)
 
         if (isPresident) {
-          setSchools(data[2])
+          const schoolsData = await fetchAllPages(
+            'Schools',
+            token,
+            controller.signal
+          )
+
+          setSchools(schoolsData)
+        } else {
+          setSchools([])
         }
       } catch (err) {
         if (err.name !== 'AbortError') {
-          setError(err.message || 'Something went wrong.')
-          setLoading(false)
+          setError(err.message || 'Failed to load enrollment data.')
         }
       }
     }
@@ -191,7 +164,60 @@ function EnrollmentsPage() {
     return () => controller.abort()
   }, [token, isPresident])
 
-  // Fetch enrollments according to search and filters
+  // Search students through the backend for direct enrollment
+  useEffect(() => {
+    if (!token || !studentSearch.trim()) return
+
+    const controller = new AbortController()
+
+    async function searchStudents() {
+      try {
+        const params = new URLSearchParams({
+          pageNumber: '1',
+          pageSize: String(STUDENT_LOOKUP_PAGE_SIZE),
+          searchTerm: studentSearch.trim(),
+        })
+
+        const response = await fetch(
+          `${API}/Students?${params}`,
+          {
+            headers: getAuthHeaders(token),
+            signal: controller.signal,
+          }
+        )
+
+        if (!response.ok) {
+          throw new Error(
+            await getErrorMessage(
+              response,
+              'Failed to search students.'
+            )
+          )
+        }
+
+        const data = await response.json()
+
+        setStudentResults(data.items || [])
+        setStudentResultsQuery(studentSearch.trim())
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          setStudentLookupError(
+            err.message || 'Something went wrong.'
+          )
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setStudentLookupLoading(false)
+        }
+      }
+    }
+
+    searchStudents()
+
+    return () => controller.abort()
+  }, [token, studentSearch])
+
+  // Fetch enrollments using backend search and filters
   useEffect(() => {
     if (!token) return
 
@@ -199,20 +225,56 @@ function EnrollmentsPage() {
 
     async function loadEnrollments() {
       try {
-        const data = await fetchEnrollmentData({
-          token,
-          pageNumber,
-          search,
-          selectedStatus,
-          selectedCourse,
-          selectedSchool,
-          isPresident,
-          signal: controller.signal,
+        const params = new URLSearchParams({
+          pageNumber: String(pageNumber),
+          pageSize: String(PAGE_SIZE),
         })
 
-        setEnrollments(data.items)
-        setTotalCount(data.totalCount)
-        setTotalPages(data.totalPages)
+        if (activeSearch) {
+          params.set('searchTerm', activeSearch)
+        }
+
+        if (selectedStatus !== 'all') {
+          params.set('status', String(selectedStatus))
+        }
+
+        if (selectedCourse !== 'all') {
+          params.set('courseId', String(selectedCourse))
+        }
+
+        if (isPresident && selectedSchool !== 'all') {
+          params.set('schoolId', String(selectedSchool))
+        }
+
+        const response = await fetch(
+          `${API}/Enrollments?${params}`,
+          {
+            headers: getAuthHeaders(token),
+            signal: controller.signal,
+          }
+        )
+
+        if (!response.ok) {
+          throw new Error(
+            await getErrorMessage(
+              response,
+              'Failed to load enrollments.'
+            )
+          )
+        }
+
+        const data = await response.json()
+        const responseTotalPages = data.totalPages || 1
+
+        if (pageNumber > responseTotalPages) {
+          setPageNumber(responseTotalPages)
+          return
+        }
+
+        setEnrollments(data.items || [])
+        setTotalCount(data.totalCount || 0)
+        setTotalPages(responseTotalPages)
+        setError('')
       } catch (err) {
         if (err.name !== 'AbortError') {
           setError(err.message || 'Something went wrong.')
@@ -230,28 +292,46 @@ function EnrollmentsPage() {
   }, [
     token,
     pageNumber,
-    search,
+    activeSearch,
     selectedStatus,
     selectedCourse,
     selectedSchool,
     isPresident,
+    refreshKey,
   ])
 
-  // Refresh enrollments after an action
-  async function refreshEnrollments(targetPage = pageNumber) {
-    const data = await fetchEnrollmentData({
-      token,
-      pageNumber: targetPage,
-      search,
-      selectedStatus,
-      selectedCourse,
-      selectedSchool,
-      isPresident,
-    })
+  // Submit enrollment search
+  function handleSearch(e) {
+    e.preventDefault()
 
-    setEnrollments(data.items)
-    setTotalCount(data.totalCount)
-    setTotalPages(data.totalPages)
+    const nextSearch = search.trim()
+
+    if (nextSearch === activeSearch && pageNumber === 1) {
+      return
+    }
+
+    setError('')
+    setLoading(true)
+    setPageNumber(1)
+    setActiveSearch(nextSearch)
+  }
+
+  function handleClearSearch() {
+  setSearch('')
+  setActiveSearch('')
+  setSelectedStatus('all')
+  setSelectedCourse('all')
+  setSelectedSchool('all')
+  setPageNumber(1)
+}
+
+  // Handle student picker input
+  function handleStudentSearchChange(e) {
+    const value = e.target.value
+
+    setStudentSearch(value)
+    setStudentLookupError('')
+    setStudentLookupLoading(Boolean(value.trim()))
   }
 
   // Create direct enrollment
@@ -281,7 +361,10 @@ function EnrollmentsPage() {
 
       if (!response.ok) {
         throw new Error(
-          await getErrorMessage(response, 'Failed to create enrollment.')
+          await getErrorMessage(
+            response,
+            'Failed to create enrollment.'
+          )
         )
       }
 
@@ -289,10 +372,15 @@ function EnrollmentsPage() {
       setCourseId('')
       setSelectedStudent(null)
       setStudentSearch('')
+      setStudentResults([])
+      setStudentResultsQuery('')
+      setStudentLookupError('')
+      setStudentLookupLoading(false)
       setShowForm(false)
 
       setPageNumber(1)
-      await refreshEnrollments(1)
+      setLoading(true)
+      setRefreshKey((previous) => previous + 1)
     } catch (err) {
       setActionError(err.message || 'Something went wrong.')
     } finally {
@@ -315,16 +403,21 @@ function EnrollmentsPage() {
 
       if (!response.ok) {
         throw new Error(
-          await getErrorMessage(response, `Failed to ${action} request.`)
+          await getErrorMessage(
+            response,
+            `Failed to ${action} request.`
+          )
         )
       }
 
-      await refreshEnrollments()
+      setLoading(true)
+      setRefreshKey((previous) => previous + 1)
     } catch (err) {
       setActionError(err.message || 'Something went wrong.')
     }
   }
 
+  // Delete enrollment
   async function handleDeleteEnrollment(enrollment) {
     const confirmed = window.confirm(
       `Are you sure you want to delete ${enrollment.studentName}'s enrollment in ${enrollment.courseName}?`
@@ -345,69 +438,28 @@ function EnrollmentsPage() {
 
       if (!response.ok) {
         throw new Error(
-          await getErrorMessage(response, 'Failed to delete enrollment.')
+          await getErrorMessage(
+            response,
+            'Failed to delete enrollment.'
+          )
         )
       }
 
-      await refreshEnrollments()
+      setLoading(true)
+      setRefreshKey((previous) => previous + 1)
     } catch (err) {
       setActionError(err.message || 'Something went wrong.')
     }
   }
 
-  // Apply search and filters to the loaded enrollment records
-  const filteredEnrollments = enrollments.filter((enrollment) => {
-    const matchesStatus =
-      selectedStatus === 'all' ||
-      Number(enrollment.status) === Number(selectedStatus)
-
-    const searchValue = search.toLowerCase()
-
-    const matchesSearch = [
-      enrollment.studentName,
-      enrollment.studentNumber,
-      enrollment.courseName,
-      enrollment.courseCode,
-    ].some((value) =>
-      value?.toLowerCase().includes(searchValue)
-    )
-
-    const matchesCourse =
-      selectedCourse === 'all' ||
-      Number(enrollment.courseId) === Number(selectedCourse)
-
-    const course = courses.find(
-      (item) => Number(item.id) === Number(enrollment.courseId)
-    )
-
-    const matchesSchool =
-      !isPresident ||
-      selectedSchool === 'all' ||
-      Number(course?.schoolId) === Number(selectedSchool)
-
-    return (
-      matchesStatus &&
-      matchesSearch &&
-      matchesCourse &&
-      matchesSchool
-    )
-  })
-
-  // Count enrollments by status
-  const statusCounts = {
-    all: hasFilters ? enrollments.length : totalCount,
-    0: enrollments.filter((e) => Number(e.status) === 0).length,
-    1: enrollments.filter((e) => Number(e.status) === 1).length,
-    2: enrollments.filter((e) => Number(e.status) === 2).length,
-    3: enrollments.filter((e) => Number(e.status) === 3).length,
-    4: enrollments.filter((e) => Number(e.status) === 4).length,
-  }
-
+  // Pagination
   function goToPreviousPage() {
+    setLoading(true)
     setPageNumber((previous) => Math.max(previous - 1, 1))
   }
 
   function goToNextPage() {
+    setLoading(true)
     setPageNumber((previous) =>
       Math.min(previous + 1, totalPages)
     )
@@ -421,17 +473,6 @@ function EnrollmentsPage() {
     return <p className="students-error">{error}</p>
   }
 
-  const filteredStudents = students
-    .filter((student) => {
-      const searchValue = studentSearch.toLowerCase()
-
-      return (
-        student.fullName?.toLowerCase().includes(searchValue) ||
-        student.studentNumber?.toLowerCase().includes(searchValue)
-      )
-    })
-    .slice(0, 10)
-
   return (
     <div className="dashboard-content enrollments-page">
       <div className="enrollments-page-header">
@@ -441,6 +482,7 @@ function EnrollmentsPage() {
         </div>
 
         <button
+          type="button"
           className="enrollment-add-button"
           onClick={() => {
             setShowForm(!showForm)
@@ -463,7 +505,9 @@ function EnrollmentsPage() {
           <h3>Create Direct Enrollment</h3>
 
           <div className="enrollment-student-search">
-            <label>Student</label>
+            <label htmlFor="enrollment-student-search">
+              Student
+            </label>
 
             {selectedStudent ? (
               <div className="enrollment-selected-student">
@@ -478,6 +522,10 @@ function EnrollmentsPage() {
                     setSelectedStudent(null)
                     setStudentId('')
                     setStudentSearch('')
+                    setStudentResults([])
+                    setStudentResultsQuery('')
+                    setStudentLookupError('')
+                    setStudentLookupLoading(false)
                   }}
                 >
                   Clear
@@ -486,41 +534,59 @@ function EnrollmentsPage() {
             ) : (
               <>
                 <input
+                  id="enrollment-student-search"
                   type="text"
                   placeholder="Search by student name or number..."
                   value={studentSearch}
-                  onChange={(e) => setStudentSearch(e.target.value)}
+                  onChange={handleStudentSearchChange}
                 />
 
-                {studentSearch.trim() && (
-                  <div className="enrollment-student-results">
-                    {filteredStudents.length > 0 ? (
-                      filteredStudents.map((student) => (
-                        <button
-                          type="button"
-                          key={student.id}
-                          onClick={() => {
-                            setSelectedStudent(student)
-                            setStudentId(String(student.id))
-                            setStudentSearch('')
-                          }}
-                        >
-                          <strong>{student.fullName}</strong>
-                          <span>{student.studentNumber}</span>
-                        </button>
-                      ))
-                    ) : (
-                      <p>No students found.</p>
-                    )}
-                  </div>
+                {studentLookupLoading && (
+                  <p>Searching students...</p>
                 )}
+
+                {studentLookupError && (
+                  <p className="students-error">
+                    {studentLookupError}
+                  </p>
+                )}
+
+                {studentSearch.trim() &&
+                  studentResultsQuery === studentSearch.trim() &&
+                  !studentLookupLoading && (
+                    <div className="enrollment-student-results">
+                      {studentResults.length > 0 ? (
+                        studentResults.map((student) => (
+                          <button
+                            type="button"
+                            key={student.id}
+                            onClick={() => {
+                              setSelectedStudent(student)
+                              setStudentId(String(student.id))
+                              setStudentSearch('')
+                              setStudentResults([])
+                              setStudentResultsQuery('')
+                              setStudentLookupError('')
+                              setStudentLookupLoading(false)
+                            }}
+                          >
+                            <strong>{student.fullName}</strong>
+                            <span>{student.studentNumber}</span>
+                          </button>
+                        ))
+                      ) : (
+                        <p>No students found.</p>
+                      )}
+                    </div>
+                  )}
               </>
             )}
           </div>
 
           <div>
-            <label>Course</label>
+            <label htmlFor="enrollment-course">Course</label>
             <select
+              id="enrollment-course"
               value={courseId}
               onChange={(e) => setCourseId(e.target.value)}
               required
@@ -549,6 +615,7 @@ function EnrollmentsPage() {
       <div className="enrollment-status-filters">
         {STATUS_OPTIONS.map((status) => (
           <button
+            type="button"
             key={String(status.value)}
             className={
               selectedStatus === status.value
@@ -556,31 +623,49 @@ function EnrollmentsPage() {
                 : 'enrollment-filter'
             }
             onClick={() => {
+              setError('')
+              setLoading(true)
               setSelectedStatus(status.value)
               setPageNumber(1)
             }}
           >
             {status.label}
-            <span>{statusCounts[status.value]}</span>
           </button>
         ))}
       </div>
 
       {/* Search and dropdown filters */}
-      <div className="enrollment-filters">
+      <form
+        className="enrollment-filters"
+        onSubmit={handleSearch}
+      >
         <input
           type="text"
-          placeholder="Search by student or course..."
+          placeholder="Search by student name or number..."
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value)
-            setPageNumber(1)
-          }}
+          onChange={(e) => setSearch(e.target.value)}
         />
+
+        <button
+          type="submit"
+          className="students-search-button"
+        >
+          Search
+        </button>
+
+        <button
+          type="button"
+          className="students-search-button"
+          onClick={handleClearSearch}
+        >
+          Clear
+        </button>
 
         <select
           value={selectedCourse}
           onChange={(e) => {
+            setError('')
+            setLoading(true)
             setSelectedCourse(e.target.value)
             setPageNumber(1)
           }}
@@ -598,6 +683,8 @@ function EnrollmentsPage() {
           <select
             value={selectedSchool}
             onChange={(e) => {
+              setError('')
+              setLoading(true)
               setSelectedSchool(e.target.value)
               setPageNumber(1)
             }}
@@ -611,11 +698,7 @@ function EnrollmentsPage() {
             ))}
           </select>
         )}
-
-        <span className="enrollment-count">
-          {hasFilters ? filteredEnrollments.length : totalCount} enrollments
-        </span>
-      </div>
+      </form>
 
       {/* Enrollments table */}
       <div className="enrollments-table-wrapper">
@@ -636,8 +719,8 @@ function EnrollmentsPage() {
           </thead>
 
           <tbody>
-            {filteredEnrollments.length > 0 ? (
-              filteredEnrollments.map((enrollment) => {
+            {enrollments.length > 0 ? (
+              enrollments.map((enrollment) => {
                 const course = courses.find(
                   (item) =>
                     Number(item.id) === Number(enrollment.courseId)
@@ -656,7 +739,12 @@ function EnrollmentsPage() {
                     <td>{enrollment.courseCode}</td>
 
                     {isPresident && (
-                      <td>{school?.name ?? '—'}</td>
+                      <td>
+                        {enrollment.schoolName ||
+                          course?.schoolName ||
+                          school?.name ||
+                          '—'}
+                      </td>
                     )}
 
                     <td>{formatDate(enrollment.enrollmentDate)}</td>
@@ -676,6 +764,7 @@ function EnrollmentsPage() {
                         {Number(enrollment.status) === 1 && (
                           <>
                             <button
+                              type="button"
                               className="enrollment-approve-button"
                               onClick={() =>
                                 handleRequestAction(enrollment.id, 'approve')
@@ -685,6 +774,7 @@ function EnrollmentsPage() {
                             </button>
 
                             <button
+                              type="button"
                               className="enrollment-decline-button"
                               onClick={() =>
                                 handleRequestAction(enrollment.id, 'decline')
@@ -696,6 +786,7 @@ function EnrollmentsPage() {
                         )}
 
                         <button
+                          type="button"
                           className="enrollment-decline-button"
                           onClick={() => handleDeleteEnrollment(enrollment)}
                         >
@@ -720,29 +811,31 @@ function EnrollmentsPage() {
         </table>
       </div>
 
-      {!hasFilters && totalPages > 1 && (
-        <div className="students-pagination">
-          <button
-            className="students-pagination-button"
-            onClick={goToPreviousPage}
-            disabled={pageNumber === 1}
-          >
-            Previous
-          </button>
+      <div className="students-pagination">
+        <button
+          type="button"
+          className="students-pagination-button"
+          onClick={goToPreviousPage}
+          disabled={pageNumber === 1 || loading}
+        >
+          Previous
+        </button>
 
-          <span className="students-page-info">
-            Page {pageNumber} of {totalPages}
-          </span>
+        <span className="students-page-info">
+          Page {pageNumber} of {Math.max(totalPages, 1)}
+          {' | '}
+          {totalCount} enrollments
+        </span>
 
-          <button
-            className="students-pagination-button"
-            onClick={goToNextPage}
-            disabled={pageNumber === totalPages}
-          >
-            Next
-          </button>
-        </div>
-      )}
+        <button
+          type="button"
+          className="students-pagination-button"
+          onClick={goToNextPage}
+          disabled={pageNumber >= totalPages || loading}
+        >
+          Next
+        </button>
+      </div>
     </div>
   )
 }

@@ -98,7 +98,12 @@ namespace UMS.Application.Services
         }
 
 
-        public async Task<PagedResult<CourseDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize)
+        public async Task<PagedResultDto<CourseDto>> GetAllPagedAsync(
+            int currentUserId,
+            int pageNumber,
+            int pageSize,
+            string? searchTerm = null,
+            int? schoolId = null)
         {
             pageNumber = Math.Max(1, pageNumber);
             pageSize = Math.Clamp(pageSize, 1, 100);
@@ -112,9 +117,9 @@ namespace UMS.Application.Services
 
             if (user.Role == UserRole.Director)
             {
-                var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+                var directorSchoolId = await GetDirectorSchoolIdAsync(user.Id);
 
-                courses = courses.Where(c => c.SchoolId == schoolId);
+                courses = courses.Where(c => c.SchoolId == directorSchoolId);
             }
             else if (user.Role == UserRole.Professor)
             {
@@ -128,9 +133,7 @@ namespace UMS.Application.Services
                     throw new UnauthorizedAccessException(
                         "Professor profile not found.");
 
-                courses = courses.Where(
-                    c => c.ProfessorId == professor.Id
-                );
+                courses = courses.Where(c => c.ProfessorId == professor.Id);
             }
             else if (user.Role == UserRole.Student)
             {
@@ -144,9 +147,18 @@ namespace UMS.Application.Services
                     throw new UnauthorizedAccessException(
                         "Student profile not found.");
 
-                courses = courses.Where(
-                    c => c.SchoolId == student.SchoolId
-                );
+                courses = courses.Where(c => c.SchoolId == student.SchoolId);
+            }
+            else if (user.Role == UserRole.President && schoolId.HasValue)
+            {
+                courses = courses.Where(c => c.SchoolId == schoolId.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                courses = courses.Where(c =>
+                    c.Name.Contains(searchTerm) ||
+                    c.Code.Contains(searchTerm));
             }
 
             var totalCount = await courses.CountAsync();
@@ -189,7 +201,7 @@ namespace UMS.Application.Services
                 StudentCount = studentCounts.GetValueOrDefault(c.Id, 0)
             }).ToList();
 
-            return new PagedResult<CourseDto>
+            return new PagedResultDto<CourseDto>
             {
                 Items = items,
                 PageNumber = pageNumber,

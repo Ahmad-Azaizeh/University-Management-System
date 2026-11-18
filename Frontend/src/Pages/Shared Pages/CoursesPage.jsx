@@ -4,6 +4,50 @@ import { useAuth } from '../../context/AuthContext.jsx'
 
 const API_URL = 'https://localhost:7245/api'
 const PAGE_SIZE = 10
+const LOOKUP_PAGE_SIZE = 100
+
+async function getErrorMessage(response, fallback) {
+  const message = await response.text()
+  return message || fallback
+}
+
+async function fetchAllPages(endpoint, token, signal) {
+  let allItems = []
+  let currentPage = 1
+
+  while (true) {
+    const params = new URLSearchParams({
+      pageNumber: String(currentPage),
+      pageSize: String(LOOKUP_PAGE_SIZE),
+    })
+
+    const response = await fetch(
+      `${API_URL}/${endpoint}?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal,
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`Failed to load ${endpoint.toLowerCase()}.`)
+    }
+
+    const data = await response.json()
+
+    allItems = [...allItems, ...(data.items || [])]
+
+    if (currentPage >= (data.totalPages || 1)) {
+      break
+    }
+
+    currentPage += 1
+  }
+
+  return allItems
+}
 
 function CoursesPage() {
   const { user } = useAuth()
@@ -15,8 +59,10 @@ function CoursesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [formError, setFormError] = useState('')
+
   const [search, setSearch] = useState('')
   const [activeSearch, setActiveSearch] = useState('')
+  const [selectedSchoolId, setSelectedSchoolId] = useState('')
 
   const [pageNumber, setPageNumber] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -48,8 +94,10 @@ function CoursesPage() {
 
   const canManageCourses = isPresident || isDirector
 
-  // Fetch courses, professors, and schools
+  // Fetch courses and management dropdown data
   useEffect(() => {
+    const controller = new AbortController()
+
     async function fetchData() {
       try {
         setLoading(true)
@@ -59,62 +107,73 @@ function CoursesPage() {
           Authorization: `Bearer ${user.token}`,
         }
 
-        const coursesUrl = activeSearch
-          ? `${API_URL}/Courses?paginated=false`
-          : `${API_URL}/Courses?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`
+        const params = new URLSearchParams({
+          pageNumber: String(pageNumber),
+          pageSize: String(PAGE_SIZE),
+        })
+
+        if (activeSearch) {
+          params.set('searchTerm', activeSearch)
+        }
+
+        if (selectedSchoolId) {
+          params.set('schoolId', selectedSchoolId)
+        }
 
         const coursesResponse = await fetch(
-          coursesUrl,
-          { headers }
+          `${API_URL}/Courses?${params}`,
+          {
+            headers,
+            signal: controller.signal,
+          }
         )
 
         if (!coursesResponse.ok) {
-          throw new Error('Failed to load courses.')
+          throw new Error(
+            await getErrorMessage(
+              coursesResponse,
+              'Failed to load courses.'
+            )
+          )
         }
 
         const coursesData = await coursesResponse.json()
 
-        if (activeSearch) {
-          setCourses(coursesData)
-          setTotalCount(coursesData.length)
-          setTotalPages(1)
-        } else {
-          setCourses(coursesData.items || [])
-          setTotalCount(coursesData.totalCount || 0)
-          setTotalPages(coursesData.totalPages || 1)
-        }
+        setCourses(coursesData.items || [])
+        setTotalCount(coursesData.totalCount || 0)
+        setTotalPages(coursesData.totalPages || 1)
 
         if (canManageCourses) {
-          const professorsResponse = await fetch(
-            `${API_URL}/Professors?paginated=false`,
-            { headers }
+          const professorsData = await fetchAllPages(
+            'Professors',
+            user.token,
+            controller.signal
           )
 
-          if (!professorsResponse.ok) {
-            throw new Error('Failed to load professors.')
-          }
-
-          const professorsData = await professorsResponse.json()
           setProfessors(professorsData)
+        } else {
+          setProfessors([])
         }
 
         if (isPresident) {
-          const schoolsResponse = await fetch(
-            `${API_URL}/Schools`,
-            { headers }
+          const schoolsData = await fetchAllPages(
+            'Schools',
+            user.token,
+            controller.signal
           )
 
-          if (!schoolsResponse.ok) {
-            throw new Error('Failed to load schools.')
-          }
-
-          const schoolsData = await schoolsResponse.json()
           setSchools(schoolsData)
+        } else {
+          setSchools([])
         }
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Something went wrong.')
+        }
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
       }
     }
 
@@ -123,20 +182,44 @@ function CoursesPage() {
     } else {
       setLoading(false)
     }
+
+    return () => controller.abort()
   }, [
     user?.token,
     isPresident,
     canManageCourses,
     pageNumber,
     activeSearch,
+    selectedSchoolId,
     refreshKey,
   ])
 
   // Search courses
   function handleSearch(e) {
     e.preventDefault()
+
+    const nextSearch = search.trim()
+
+    if (nextSearch === activeSearch && pageNumber === 1) {
+      return
+    }
+
     setPageNumber(1)
-    setActiveSearch(search.trim())
+    setActiveSearch(nextSearch)
+  }
+
+  // Filter courses by school
+  function handleSchoolFilterChange(e) {
+    setSelectedSchoolId(e.target.value)
+    setPageNumber(1)
+  }
+
+  // Clear search and school filter
+  function handleClearSearch() {
+    setSearch('')
+    setActiveSearch('')
+    setSelectedSchoolId('')
+    setPageNumber(1)
   }
 
   // View students enrolled in a course
@@ -171,7 +254,12 @@ function CoursesPage() {
       )
 
       if (!response.ok) {
-        throw new Error('Failed to load students for this course.')
+        throw new Error(
+          await getErrorMessage(
+            response,
+            'Failed to load students for this course.'
+          )
+        )
       }
 
       const data = await response.json()
@@ -299,11 +387,11 @@ function CoursesPage() {
       }
 
       if (!response.ok) {
-        const message = await response.text()
-
         throw new Error(
-          message ||
+          await getErrorMessage(
+            response,
             `Failed to ${editingCourse ? 'update' : 'create'} course.`
+          )
         )
       }
 
@@ -349,9 +437,12 @@ function CoursesPage() {
       )
 
       if (!response.ok) {
-        const message = await response.text()
-
-        throw new Error(message || 'Failed to delete course.')
+        throw new Error(
+          await getErrorMessage(
+            response,
+            'Failed to delete course.'
+          )
+        )
       }
 
       setCourseStudents((previous) => {
@@ -392,18 +483,6 @@ function CoursesPage() {
       )
     : professors
 
-  // Filter courses using the submitted search
-  const filteredCourses = courses.filter((course) =>
-    [
-      course.name,
-      course.code,
-      course.schoolName,
-      course.professorName,
-    ].some((value) =>
-      (value ?? '').toLowerCase().includes(activeSearch.toLowerCase())
-    )
-  )
-
   if (loading) {
     return (
       <section className="dashboard-content">
@@ -420,17 +499,16 @@ function CoursesPage() {
           <p>
             {isPresident
               ? 'Manage courses across all university schools.'
-              : 'Manage courses offered by your school.'}
+              : isDirector
+              ? 'Manage courses offered by your school.'
+              : 'View courses assigned to you.'}
           </p>
         </div>
 
         <div className="students-header-actions">
-          <span className="students-count">
-            {activeSearch ? filteredCourses.length : totalCount} courses
-          </span>
-
           {canManageCourses && (
             <button
+              type="button"
               className="students-add-button"
               onClick={openCreateForm}
             >
@@ -444,6 +522,7 @@ function CoursesPage() {
         <p className="students-error">{error}</p>
       )}
 
+      {/* Search and School Filter */}
       <form
         className="students-search-form"
         onSubmit={handleSearch}
@@ -451,7 +530,7 @@ function CoursesPage() {
         <input
           className="students-search"
           type="text"
-          placeholder="Search by course, code, school, or professor..."
+          placeholder="Search by course name or code..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -462,6 +541,32 @@ function CoursesPage() {
         >
           Search
         </button>
+
+        <button
+          type="button"
+          className="students-search-button"
+          onClick={handleClearSearch}
+        >
+          Clear
+        </button>
+
+        {isPresident && (
+          <select
+            className="students-search"
+            value={selectedSchoolId}
+            onChange={handleSchoolFilterChange}
+          >
+            <option value="">All Schools</option>
+
+            {schools.map((school) => (
+              <option key={school.id} value={school.id}>
+                {school.name}
+              </option>
+            ))}
+          </select>
+        )}
+
+        
       </form>
 
       <div className="students-table-wrapper">
@@ -479,7 +584,7 @@ function CoursesPage() {
           </thead>
 
           <tbody>
-            {filteredCourses.map((course) => (
+            {courses.map((course) => (
               <Fragment key={course.id}>
                 <tr>
                   <td>{course.name}</td>
@@ -490,6 +595,7 @@ function CoursesPage() {
 
                   <td>
                     <button
+                      type="button"
                       className="student-details-button"
                       onClick={() => handleCourseView(course.id)}
                     >
@@ -501,6 +607,7 @@ function CoursesPage() {
                     <td>
                       <div className="students-actions">
                         <button
+                          type="button"
                           className="students-edit-button"
                           onClick={() => openEditForm(course)}
                         >
@@ -508,6 +615,7 @@ function CoursesPage() {
                         </button>
 
                         <button
+                          type="button"
                           className="students-delete-button"
                           disabled={deletingCourseId === course.id}
                           onClick={() => handleDelete(course)}
@@ -575,7 +683,7 @@ function CoursesPage() {
               </Fragment>
             ))}
 
-            {filteredCourses.length === 0 && (
+            {courses.length === 0 && (
               <tr>
                 <td colSpan={canManageCourses ? 7 : 6}>
                   No courses found.
@@ -586,29 +694,31 @@ function CoursesPage() {
         </table>
       </div>
 
-      {!activeSearch && totalPages > 1 && (
-        <div className="students-pagination">
-          <button
-            className="students-pagination-button"
-            onClick={goToPreviousPage}
-            disabled={pageNumber === 1}
-          >
-            Previous
-          </button>
+      <div className="students-pagination">
+        <button
+          type="button"
+          className="students-pagination-button"
+          onClick={goToPreviousPage}
+          disabled={pageNumber === 1 || loading}
+        >
+          Previous
+        </button>
 
-          <span className="students-page-info">
-            Page {pageNumber} of {totalPages}
-          </span>
+        <span className="students-page-info">
+          Page {pageNumber} of {Math.max(totalPages, 1)}
+          {' | '}
+          {totalCount} courses
+        </span>
 
-          <button
-            className="students-pagination-button"
-            onClick={goToNextPage}
-            disabled={pageNumber === totalPages}
-          >
-            Next
-          </button>
-        </div>
-      )}
+        <button
+          type="button"
+          className="students-pagination-button"
+          onClick={goToNextPage}
+          disabled={pageNumber >= totalPages || loading}
+        >
+          Next
+        </button>
+      </div>
 
       {/* Add / Edit Form */}
       {showForm && (
@@ -630,8 +740,9 @@ function CoursesPage() {
             </div>
 
             <form onSubmit={handleSubmit}>
-              <label>Course Name</label>
+              <label htmlFor="course-name">Course Name</label>
               <input
+                id="course-name"
                 type="text"
                 name="name"
                 value={formData.name}
@@ -639,8 +750,9 @@ function CoursesPage() {
                 required
               />
 
-              <label>Course Code</label>
+              <label htmlFor="course-code">Course Code</label>
               <input
+                id="course-code"
                 type="text"
                 name="code"
                 value={formData.code}
@@ -650,8 +762,9 @@ function CoursesPage() {
 
               {isPresident && (
                 <>
-                  <label>School</label>
+                  <label htmlFor="course-school">School</label>
                   <select
+                    id="course-school"
                     name="schoolId"
                     value={formData.schoolId}
                     onChange={handleFormChange}
@@ -668,8 +781,9 @@ function CoursesPage() {
                 </>
               )}
 
-              <label>Professor</label>
+              <label htmlFor="course-professor">Professor</label>
               <select
+                id="course-professor"
                 name="professorId"
                 value={formData.professorId}
                 onChange={handleFormChange}

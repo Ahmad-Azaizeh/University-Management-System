@@ -1,8 +1,62 @@
+
 import { Fragment, useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const API_URL = 'https://localhost:7245/api'
 const PAGE_SIZE = 10
+const SCHOOL_PAGE_SIZE = 100
+
+async function getErrorMessage(response, fallback) {
+  const result = await response.json().catch(() => null)
+
+  return result?.message || result?.title || result?.detail || fallback
+}
+
+async function fetchAllPages(endpoint, token, signal, filters = {}) {
+  let pageNumber = 1
+  let totalPages = 1
+  const allItems = []
+
+  while (pageNumber <= totalPages) {
+    const query = new URLSearchParams({
+      pageNumber: String(pageNumber),
+      pageSize: String(SCHOOL_PAGE_SIZE),
+    })
+
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        query.set(key, String(value))
+      }
+    })
+
+    const response = await fetch(
+      `${API_URL}/${endpoint}?${query.toString()}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal,
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(
+        await getErrorMessage(response, `Failed to load ${endpoint}.`)
+      )
+    }
+
+    const data = await response.json()
+
+    allItems.push(...(data.items ?? []))
+
+    totalPages = data.totalPages ??
+      Math.ceil((data.totalCount ?? 0) / SCHOOL_PAGE_SIZE)
+
+    pageNumber++
+  }
+
+  return allItems
+}
 
 function ProfessorsPage() {
   const { user } = useAuth()
@@ -10,11 +64,15 @@ function ProfessorsPage() {
 
   const [professors, setProfessors] = useState([])
   const [schools, setSchools] = useState([])
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [formError, setFormError] = useState('')
+
   const [search, setSearch] = useState('')
   const [activeSearch, setActiveSearch] = useState('')
+  const [selectedSchoolId, setSelectedSchoolId] = useState('')
+
   const [pageNumber, setPageNumber] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
@@ -41,62 +99,115 @@ function ProfessorsPage() {
   const isPresident =
     user?.role === 3 || user?.role === 'President'
 
+  // Load schools for the President
   useEffect(() => {
-    async function fetchData() {
+    if (!token || !isPresident) return
+
+    const controller = new AbortController()
+
+    async function loadSchools() {
       try {
-        const headers = {
-          Authorization: `Bearer ${token}`,
-        }
+        const data = await fetchAllPages(
+          'Schools',
+          token,
+          controller.signal
+        )
 
-        const professorsUrl = activeSearch
-          ? `${API_URL}/Professors?paginated=false`
-          : `${API_URL}/Professors?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`
-
-        const requests = [
-          fetch(professorsUrl, { headers }),
-        ]
-
-        if (isPresident) {
-          requests.push(fetch(`${API_URL}/Schools`, { headers }))
-        }
-
-        const responses = await Promise.all(requests)
-
-        if (responses.some((response) => !response.ok)) {
-          throw new Error('Failed to load professors.')
-        }
-
-        const professorsData = await responses[0].json()
-
-        if (activeSearch) {
-          setProfessors(professorsData)
-          setTotalCount(professorsData.length)
-          setTotalPages(1)
-        } else {
-          setProfessors(professorsData.items)
-          setTotalCount(professorsData.totalCount)
-          setTotalPages(professorsData.totalPages)
-        }
-
-        if (isPresident) {
-          const schoolsData = await responses[1].json()
-          setSchools(schoolsData)
-        }
-
-        setError('')
+        setSchools(data)
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
-      } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) {
+          setError(err.message || 'Failed to load schools.')
+        }
       }
     }
 
-    if (token) {
-      fetchData()
-    }
-  }, [token, isPresident, pageNumber, activeSearch, refreshKey])
+    loadSchools()
 
-  async function handleProfessorView(professorId) {
+    return () => controller.abort()
+  }, [token, isPresident])
+
+  // Load paginated professors
+  useEffect(() => {
+    if (!token) return
+
+    const controller = new AbortController()
+
+    async function loadProfessors() {
+      setLoading(true)
+
+      try {
+        const query = new URLSearchParams({
+          pageNumber: String(pageNumber),
+          pageSize: String(PAGE_SIZE),
+        })
+
+        if (activeSearch) {
+          query.set('searchTerm', activeSearch)
+        }
+
+        if (isPresident && selectedSchoolId) {
+          query.set('schoolId', selectedSchoolId)
+        }
+
+        const response = await fetch(
+          `${API_URL}/Professors?${query.toString()}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            signal: controller.signal,
+          }
+        )
+
+        if (!response.ok) {
+          throw new Error(
+            await getErrorMessage(response, 'Failed to load professors.')
+          )
+        }
+
+        const data = await response.json()
+
+        const pages = Math.max(
+          data.totalPages ??
+            Math.ceil((data.totalCount ?? 0) / PAGE_SIZE),
+          1
+        )
+
+        setProfessors(data.items ?? [])
+        setTotalCount(data.totalCount ?? 0)
+        setTotalPages(pages)
+        setError('')
+
+        if (pageNumber > pages) {
+          setPageNumber(pages)
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setError(err.message || 'Something went wrong.')
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadProfessors()
+
+    return () => controller.abort()
+  }, [
+    token,
+    isPresident,
+    pageNumber,
+    activeSearch,
+    selectedSchoolId,
+    refreshKey,
+  ])
+
+  // View courses assigned to a professor
+  async function handleProfessorView(professor) {
+    const professorId = professor.id
+
     if (selectedProfessorId === professorId) {
       setSelectedProfessorId(null)
       return
@@ -117,28 +228,20 @@ function ProfessorsPage() {
     }))
 
     try {
-      const response = await fetch(
-        `${API_URL}/Courses?paginated=false`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+      const assignedCourses = await fetchAllPages(
+        'Courses',
+        token,
+        undefined,
+        { schoolId: professor.schoolId }
       )
 
-      if (!response.ok) {
-        throw new Error('Failed to load assigned courses.')
-      }
-
-      const data = await response.json()
-
-      const assignedCourses = data.filter(
-        (course) => course.professorId === professorId
+      const filteredCourses = assignedCourses.filter(
+        (course) => Number(course.professorId) === Number(professorId)
       )
 
       setProfessorCourses((previous) => ({
         ...previous,
-        [professorId]: assignedCourses,
+        [professorId]: filteredCourses,
       }))
     } catch (err) {
       setCourseErrors((previous) => ({
@@ -153,9 +256,11 @@ function ProfessorsPage() {
     }
   }
 
+  // Open create form
   function openCreateForm() {
     setEditingProfessor(null)
     setFormError('')
+
     setFormData({
       fullName: '',
       loginId: '',
@@ -163,12 +268,15 @@ function ProfessorsPage() {
       employeeNumber: '',
       schoolId: '',
     })
+
     setShowForm(true)
   }
 
+  // Open edit form
   function openEditForm(professor) {
     setEditingProfessor(professor)
     setFormError('')
+
     setFormData({
       fullName: professor.fullName,
       loginId: '',
@@ -176,9 +284,11 @@ function ProfessorsPage() {
       employeeNumber: professor.employeeNumber,
       schoolId: String(professor.schoolId),
     })
+
     setShowForm(true)
   }
 
+  // Close form
   function closeForm() {
     if (saving) return
 
@@ -187,6 +297,7 @@ function ProfessorsPage() {
     setFormError('')
   }
 
+  // Handle form inputs
   function handleFormChange(e) {
     const { name, value } = e.target
 
@@ -196,6 +307,7 @@ function ProfessorsPage() {
     }))
   }
 
+  // Create or update professor
   async function handleSubmit(e) {
     e.preventDefault()
     setFormError('')
@@ -257,10 +369,11 @@ function ProfessorsPage() {
       }
 
       if (!response.ok) {
-        const message = await response.text()
         throw new Error(
-          message ||
+          await getErrorMessage(
+            response,
             `Failed to ${editingProfessor ? 'update' : 'create'} professor.`
+          )
         )
       }
 
@@ -270,6 +383,7 @@ function ProfessorsPage() {
       setEditingProfessor(null)
       setSearch('')
       setActiveSearch('')
+      setSelectedSchoolId('')
       setPageNumber(1)
       setRefreshKey((previous) => previous + 1)
     } catch (err) {
@@ -279,6 +393,7 @@ function ProfessorsPage() {
     }
   }
 
+  // Delete professor
   async function handleDelete(professor) {
     const confirmed = window.confirm(
       `Are you sure you want to delete ${professor.fullName}?`
@@ -301,26 +416,12 @@ function ProfessorsPage() {
       )
 
       if (!response.ok) {
-        const responseText = await response.text()
-        let message = responseText
-
-        try {
-          const data = JSON.parse(responseText)
-          message = data.message || responseText
-        } catch {
-          throw new Error(
-            responseText || 'Failed to delete professor.'
-          )
-        }
-
-        throw new Error(message || 'Failed to delete professor.')
+        throw new Error(
+          await getErrorMessage(response, 'Failed to delete professor.')
+        )
       }
 
-      if (
-        professors.length === 1 &&
-        pageNumber > 1 &&
-        !activeSearch
-      ) {
+      if (professors.length === 1 && pageNumber > 1) {
         setPageNumber((previous) => previous - 1)
       }
 
@@ -342,39 +443,41 @@ function ProfessorsPage() {
     }
   }
 
-  const filteredProfessors = professors.filter((professor) =>
-    [
-      professor.fullName,
-      professor.employeeNumber,
-      professor.schoolName,
-    ].some((value) =>
-      (value ?? '').toLowerCase().includes(activeSearch.toLowerCase())
-    )
-  )
-
+  // Search professors
   function handleSearchSubmit(e) {
     e.preventDefault()
     setPageNumber(1)
+    setSelectedProfessorId(null)
     setActiveSearch(search.trim())
   }
 
+  // Clear search and school filter
   function handleClearSearch() {
     setSearch('')
     setActiveSearch('')
+    setSelectedSchoolId('')
+    setSelectedProfessorId(null)
+    setPageNumber(1)
+  }
+
+  // Change school filter
+  function handleSchoolChange(e) {
+    setSelectedSchoolId(e.target.value)
+    setSelectedProfessorId(null)
     setPageNumber(1)
   }
 
   function goToPreviousPage() {
     setPageNumber((previous) => Math.max(previous - 1, 1))
+    setSelectedProfessorId(null)
   }
 
   function goToNextPage() {
-    setPageNumber((previous) =>
-      Math.min(previous + 1, totalPages)
-    )
+    setPageNumber((previous) => Math.min(previous + 1, totalPages))
+    setSelectedProfessorId(null)
   }
 
-  if (loading) {
+  if (loading && professors.length === 0) {
     return (
       <section className="dashboard-content">
         <p>Loading professors...</p>
@@ -395,13 +498,9 @@ function ProfessorsPage() {
         </div>
 
         <div className="students-header-actions">
-          <span className="students-count">
-            {activeSearch
-              ? filteredProfessors.length
-              : totalCount} professors
-          </span>
-
+          
           <button
+            type="button"
             className="students-add-button"
             onClick={openCreateForm}
           >
@@ -419,7 +518,7 @@ function ProfessorsPage() {
         <input
           className="students-search"
           type="text"
-          placeholder="Search by name, employee number, or school..."
+          placeholder="Search by professor name..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -431,7 +530,7 @@ function ProfessorsPage() {
           Search
         </button>
 
-        {activeSearch && (
+        
           <button
             className="students-search-button"
             type="button"
@@ -439,7 +538,26 @@ function ProfessorsPage() {
           >
             Clear
           </button>
+
+        {isPresident && (
+          <select
+            className="students-search"
+            value={selectedSchoolId}
+            onChange={handleSchoolChange}
+            aria-label="Filter professors by school"
+          >
+            <option value="">All schools</option>
+
+            {schools.map((school) => (
+              <option key={school.id} value={school.id}>
+                {school.name}
+              </option>
+            ))}
+          </select>
         )}
+
+        
+        
       </form>
 
       <div className="students-table-wrapper">
@@ -456,133 +574,140 @@ function ProfessorsPage() {
           </thead>
 
           <tbody>
-            {filteredProfessors.map((professor) => (
-              <Fragment key={professor.id}>
-                <tr>
-                  <td>{professor.fullName}</td>
-                  <td>{professor.employeeNumber}</td>
-                  <td>{professor.schoolName}</td>
-                  <td>{professor.courseCount}</td>
-
-                  <td>
-                    <button
-                      className="student-details-button"
-                      onClick={() =>
-                        handleProfessorView(professor.id)
-                      }
-                    >
-                      {selectedProfessorId === professor.id
-                        ? 'Hide'
-                        : 'View'}
-                    </button>
-                  </td>
-
-                  <td>
-                    <div className="students-actions">
-                      <button
-                        className="students-edit-button"
-                        onClick={() => openEditForm(professor)}
-                      >
-                        Edit
-                      </button>
-
-                      <button
-                        className="students-delete-button"
-                        disabled={deletingProfessorId === professor.id}
-                        onClick={() => handleDelete(professor)}
-                      >
-                        {deletingProfessorId === professor.id
-                          ? 'Deleting...'
-                          : 'Delete'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-
-                {selectedProfessorId === professor.id && (
+            {professors.length > 0 ? (
+              professors.map((professor) => (
+                <Fragment key={professor.id}>
                   <tr>
-                    <td colSpan="6">
-                      <div className="student-enrollments">
-                        <h3>
-                          Courses assigned to {professor.fullName}
-                        </h3>
+                    <td>{professor.fullName}</td>
+                    <td>{professor.employeeNumber}</td>
+                    <td>{professor.schoolName}</td>
+                    <td>{professor.courseCount}</td>
 
-                        {courseLoading[professor.id] && (
-                          <p>Loading courses...</p>
-                        )}
+                    <td>
+                      <button
+                        type="button"
+                        className="student-details-button"
+                        onClick={() => handleProfessorView(professor)}
+                      >
+                        {selectedProfessorId === professor.id
+                          ? 'Hide'
+                          : 'View'}
+                      </button>
+                    </td>
 
-                        {courseErrors[professor.id] && (
-                          <p className="students-error">
-                            {courseErrors[professor.id]}
-                          </p>
-                        )}
+                    <td>
+                      <div className="students-actions">
+                        <button
+                          type="button"
+                          className="students-edit-button"
+                          onClick={() => openEditForm(professor)}
+                        >
+                          Edit
+                        </button>
 
-                        {!courseLoading[professor.id] &&
-                          !courseErrors[professor.id] &&
-                          professorCourses[professor.id] && (
-                            professorCourses[professor.id].length === 0 ? (
-                              <p>No courses assigned.</p>
-                            ) : (
-                              <table className="student-courses-table">
-                                <thead>
-                                  <tr>
-                                    <th>Course Name</th>
-                                    <th>Course Code</th>
-                                  </tr>
-                                </thead>
-
-                                <tbody>
-                                  {professorCourses[professor.id].map(
-                                    (course) => (
-                                      <tr key={course.id}>
-                                        <td>{course.name}</td>
-                                        <td>{course.code}</td>
-                                      </tr>
-                                    )
-                                  )}
-                                </tbody>
-                              </table>
-                            )
-                          )}
+                        <button
+                          type="button"
+                          className="students-delete-button"
+                          disabled={deletingProfessorId === professor.id}
+                          onClick={() => handleDelete(professor)}
+                        >
+                          {deletingProfessorId === professor.id
+                            ? 'Deleting...'
+                            : 'Delete'}
+                        </button>
                       </div>
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
 
-            {filteredProfessors.length === 0 && (
+                  {selectedProfessorId === professor.id && (
+                    <tr>
+                      <td colSpan="6">
+                        <div className="student-enrollments">
+                          <h3>
+                            Courses assigned to {professor.fullName}
+                          </h3>
+
+                          {courseLoading[professor.id] && (
+                            <p>Loading courses...</p>
+                          )}
+
+                          {courseErrors[professor.id] && (
+                            <p className="students-error">
+                              {courseErrors[professor.id]}
+                            </p>
+                          )}
+
+                          {!courseLoading[professor.id] &&
+                            !courseErrors[professor.id] &&
+                            professorCourses[professor.id] && (
+                              professorCourses[professor.id].length === 0 ? (
+                                <p>No courses assigned.</p>
+                              ) : (
+                                <table className="student-courses-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Course Name</th>
+                                      <th>Course Code</th>
+                                    </tr>
+                                  </thead>
+
+                                  <tbody>
+                                    {professorCourses[professor.id].map(
+                                      (course) => (
+                                        <tr key={course.id}>
+                                          <td>{course.name}</td>
+                                          <td>{course.code}</td>
+                                        </tr>
+                                      )
+                                    )}
+                                  </tbody>
+                                </table>
+                              )
+                            )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))
+            ) : (
               <tr>
-                <td colSpan="6">No professors found.</td>
+                <td colSpan="6">
+                  {loading ? 'Loading professors...' : 'No professors found.'}
+                </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {!activeSearch && totalCount > PAGE_SIZE && (
+      
         <div className="students-pagination">
           <button
+            type="button"
             className="students-pagination-button"
             onClick={goToPreviousPage}
-            disabled={pageNumber === 1}
+            disabled={pageNumber === 1 || loading}
           >
             Previous
           </button>
 
           <span className="students-page-info">
-            Page {pageNumber} of {totalPages}
+            Page {pageNumber} of {Math.max(totalPages, 1)}
+            {' | '}
+            {totalCount} professors
           </span>
 
           <button
+            type="button"
             className="students-pagination-button"
             onClick={goToNextPage}
-            disabled={pageNumber === totalPages}
+            disabled={pageNumber >= totalPages || loading}
           >
             Next
           </button>
         </div>
-      )}
+      
 
       {showForm && (
         <div className="students-modal-overlay">
@@ -603,8 +728,9 @@ function ProfessorsPage() {
             </div>
 
             <form onSubmit={handleSubmit}>
-              <label>Full Name</label>
+              <label htmlFor="professor-full-name">Full Name</label>
               <input
+                id="professor-full-name"
                 type="text"
                 name="fullName"
                 value={formData.fullName}
@@ -614,8 +740,9 @@ function ProfessorsPage() {
 
               {!editingProfessor && (
                 <>
-                  <label>Login ID</label>
+                  <label htmlFor="professor-login-id">Login ID</label>
                   <input
+                    id="professor-login-id"
                     type="text"
                     name="loginId"
                     value={formData.loginId}
@@ -623,8 +750,11 @@ function ProfessorsPage() {
                     required
                   />
 
-                  <label>Temporary Password</label>
+                  <label htmlFor="professor-password">
+                    Temporary Password
+                  </label>
                   <input
+                    id="professor-password"
                     type="password"
                     name="password"
                     value={formData.password}
@@ -632,8 +762,11 @@ function ProfessorsPage() {
                     required
                   />
 
-                  <label>Employee Number</label>
+                  <label htmlFor="professor-employee-number">
+                    Employee Number
+                  </label>
                   <input
+                    id="professor-employee-number"
                     type="text"
                     name="employeeNumber"
                     value={formData.employeeNumber}
@@ -643,8 +776,9 @@ function ProfessorsPage() {
 
                   {isPresident && (
                     <>
-                      <label>School</label>
+                      <label htmlFor="professor-school">School</label>
                       <select
+                        id="professor-school"
                         name="schoolId"
                         value={formData.schoolId}
                         onChange={handleFormChange}
@@ -670,7 +804,9 @@ function ProfessorsPage() {
               )}
 
               {formError && (
-                <p className="students-error">{formError}</p>
+                <p className="students-error" role="alert">
+                  {formError}
+                </p>
               )}
 
               <button

@@ -26,24 +26,21 @@ namespace University_Management_System.Controllers
         [Authorize(Roles = "President,Director")]
         [HttpGet]
         public async Task<IActionResult> GetAll(
-            [FromQuery] bool paginated = true,
             [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 10)
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? searchTerm = null,
+            [FromQuery] int? schoolId = null,
+            [FromQuery] int? courseId = null)
         {
-            if (!paginated)
-            {
-                var students = await _studentService.GetAllAsync(
-                    GetCurrentUserId());
-
-                return Ok(students);
-            }
-
-            var pagedStudents = await _studentService.GetAllPagedAsync(
+            var students = await _studentService.GetAllPagedAsync(
                 GetCurrentUserId(),
                 pageNumber,
-                pageSize);
+                pageSize,
+                searchTerm,
+                schoolId,
+                courseId);
 
-            return Ok(pagedStudents);
+            return Ok(students);
         }
 
 

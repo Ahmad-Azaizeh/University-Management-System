@@ -67,7 +67,13 @@ namespace UMS.Application.Services
         }
 
 
-        public async Task<PagedResult<StudentDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize)
+        public async Task<PagedResultDto<StudentDto>> GetAllPagedAsync(
+            int currentUserId,
+            int pageNumber,
+            int pageSize,
+            string? searchTerm = null,
+            int? schoolId = null,
+            int? courseId = null)
         {
             var user = await GetAuthorizedUserAsync(currentUserId);
 
@@ -81,8 +87,26 @@ namespace UMS.Application.Services
 
             if (user.Role == UserRole.Director)
             {
-                var schoolId = await GetDirectorSchoolIdAsync(user.Id);
-                query = query.Where(s => s.SchoolId == schoolId);
+                var directorSchoolId = await GetDirectorSchoolIdAsync(user.Id);
+
+                query = query.Where(s => s.SchoolId == directorSchoolId);
+            }
+            else if (schoolId.HasValue)
+            {
+                query = query.Where(s => s.SchoolId == schoolId.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                query = query.Where(s =>
+                    s.User.FullName.Contains(searchTerm) ||
+                    s.StudentNumber.Contains(searchTerm));
+            }
+
+            if (courseId.HasValue)
+            {
+                query = query.Where(s =>
+                    s.Enrollments.Any(e => e.CourseId == courseId.Value));
             }
 
             var totalCount = await query.CountAsync();
@@ -109,11 +133,12 @@ namespace UMS.Application.Services
                     CourseName = e.Course.Name,
                     CourseCode = e.Course.Code,
                     Grade = e.Grade,
-                    Status = e.Status
+                    Status = e.Status,
+                    EnrollmentDate = e.EnrollmentDate
                 }).ToList()
             }).ToList();
 
-            return new PagedResult<StudentDto>
+            return new PagedResultDto<StudentDto>
             {
                 Items = studentDtos,
                 PageNumber = pageNumber,
@@ -291,7 +316,7 @@ namespace UMS.Application.Services
             var students = await _studentRepository.GetAllAsync(
                 "User",
                 "School",
-                "Enrollments.Course"
+                "Enrollments.Course.Professor.User"
             );
 
             var student = students.FirstOrDefault(
@@ -316,8 +341,12 @@ namespace UMS.Application.Services
                         CourseId = e.CourseId,
                         CourseName = e.Course.Name,
                         CourseCode = e.Course.Code,
+                        ProfessorName = e.Course.Professor != null
+                            ? e.Course.Professor.User.FullName
+                            : "Not assigned",
                         Grade = e.Grade,
-                        EnrollmentDate = e.EnrollmentDate
+                        EnrollmentDate = e.EnrollmentDate,
+                        Status = e.Status
                     }).ToList()
             };
         }

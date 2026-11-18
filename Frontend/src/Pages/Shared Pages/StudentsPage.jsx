@@ -4,12 +4,57 @@ import { useAuth } from '../../context/AuthContext.jsx'
 
 const API = 'https://localhost:7245/api'
 const PAGE_SIZE = 10
+const LOOKUP_PAGE_SIZE = 100
+
+async function getErrorMessage(response, fallback) {
+  const result = await response.json().catch(() => null)
+  return result?.message || result?.title || result?.detail || fallback
+}
+
+async function fetchAllPages(endpoint, token, signal) {
+  let allItems = []
+  let currentPage = 1
+
+  while (true) {
+    const params = new URLSearchParams({
+      pageNumber: String(currentPage),
+      pageSize: String(LOOKUP_PAGE_SIZE),
+    })
+
+    const response = await fetch(
+      `${API}/${endpoint}?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        signal,
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`Failed to load ${endpoint.toLowerCase()}.`)
+    }
+
+    const data = await response.json()
+
+    allItems = [...allItems, ...(data.items || [])]
+
+    if (currentPage >= (data.totalPages || 1)) {
+      break
+    }
+
+    currentPage += 1
+  }
+
+  return allItems
+}
 
 function StudentsPage() {
   const { user } = useAuth()
 
   const [students, setStudents] = useState([])
   const [schools, setSchools] = useState([])
+  const [courses, setCourses] = useState([])
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -17,6 +62,9 @@ function StudentsPage() {
 
   const [search, setSearch] = useState('')
   const [activeSearch, setActiveSearch] = useState('')
+
+  const [selectedSchoolId, setSelectedSchoolId] = useState('')
+  const [selectedCourseId, setSelectedCourseId] = useState('')
 
   const [pageNumber, setPageNumber] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -39,8 +87,50 @@ function StudentsPage() {
     schoolId: '',
   })
 
+  // Load schools and courses for filter dropdowns
   useEffect(() => {
-    async function loadData() {
+    if (!user?.token) return
+
+    const controller = new AbortController()
+
+    async function loadFilters() {
+      try {
+        if (isPresident) {
+          const schoolsData = await fetchAllPages(
+            'Schools',
+            user.token,
+            controller.signal
+          )
+
+          setSchools(schoolsData)
+        } else {
+          setSchools([])
+        }
+
+        const coursesData = await fetchAllPages(
+          'Courses',
+          user.token,
+          controller.signal
+        )
+
+        setCourses(coursesData)
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Failed to load filter options.')
+        }
+      }
+    }
+
+    loadFilters()
+
+    return () => controller.abort()
+  }, [user?.token, isPresident])
+
+  // Fetch paginated students using backend filters
+  useEffect(() => {
+    const controller = new AbortController()
+
+    async function loadStudents() {
       if (!user?.token) {
         setLoading(false)
         return
@@ -50,77 +140,117 @@ function StudentsPage() {
       setError('')
 
       try {
-        const headers = {
-          Authorization: `Bearer ${user.token}`,
-        }
-
-        const studentsUrl = activeSearch
-          ? `${API}/Students?paginated=false`
-          : `${API}/Students?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`
-
-        const studentsResponse = await fetch(studentsUrl, {
-          headers,
+        const params = new URLSearchParams({
+          pageNumber: String(pageNumber),
+          pageSize: String(PAGE_SIZE),
         })
 
+        if (activeSearch) {
+          params.set('searchTerm', activeSearch)
+        }
+
+        if (selectedSchoolId) {
+          params.set('schoolId', selectedSchoolId)
+        }
+
+        if (selectedCourseId) {
+          params.set('courseId', selectedCourseId)
+        }
+
+        const studentsResponse = await fetch(
+          `${API}/Students?${params}`,
+          {
+            headers: {
+              Authorization: `Bearer ${user.token}`,
+            },
+            signal: controller.signal,
+          }
+        )
+
         if (!studentsResponse.ok) {
-          throw new Error('Failed to load students.')
+          throw new Error(
+            await getErrorMessage(
+              studentsResponse,
+              'Failed to load students.'
+            )
+          )
         }
 
         const studentsData = await studentsResponse.json()
 
-        if (activeSearch) {
-          setStudents(studentsData)
-          setTotalCount(studentsData.length)
-          setTotalPages(1)
-        } else {
-          setStudents(studentsData.items || [])
-          setTotalCount(studentsData.totalCount || 0)
-          setTotalPages(studentsData.totalPages || 1)
-        }
+        setStudents(studentsData.items || [])
+        setTotalCount(studentsData.totalCount || 0)
+        setTotalPages(studentsData.totalPages || 1)
 
-        if (isPresident) {
-          const schoolsResponse = await fetch(`${API}/Schools`, {
-            headers,
-          })
+        const lastPage = Math.max(studentsData.totalPages || 1, 1)
 
-          if (!schoolsResponse.ok) {
-            throw new Error('Failed to load schools.')
-          }
-
-          const schoolsData = await schoolsResponse.json()
-          setSchools(schoolsData)
+        if (pageNumber > lastPage) {
+          setPageNumber(lastPage)
         }
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Something went wrong.')
+        }
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
       }
     }
 
-    loadData()
+    loadStudents()
+
+    return () => controller.abort()
   }, [
     user?.token,
-    isPresident,
     refreshKey,
     pageNumber,
     activeSearch,
+    selectedSchoolId,
+    selectedCourseId,
   ])
 
-  const filteredStudents = students.filter((student) =>
-    (student.fullName || '')
-      .toLowerCase()
-      .includes(activeSearch.toLowerCase()) ||
-    (student.studentNumber || '')
-      .toLowerCase()
-      .includes(activeSearch.toLowerCase())
-  )
-
+  // Search students
   function handleSearch(e) {
     e.preventDefault()
+
+    const nextSearch = search.trim()
+
+    if (nextSearch === activeSearch && pageNumber === 1) {
+      return
+    }
+
+    setError('')
     setPageNumber(1)
-    setActiveSearch(search.trim())
+    setActiveSearch(nextSearch)
   }
 
+  // Filter by school
+  function handleSchoolFilterChange(e) {
+    setSelectedSchoolId(e.target.value)
+    setSelectedCourseId('')
+    setPageNumber(1)
+    setError('')
+  }
+
+  // Filter by course
+  function handleCourseFilterChange(e) {
+    setSelectedCourseId(e.target.value)
+    setPageNumber(1)
+    setError('')
+  }
+
+  // Clear search and all filters
+  function handleClearSearch() {
+    setSearch('')
+    setActiveSearch('')
+    setSelectedSchoolId('')
+    setSelectedCourseId('')
+    setPageNumber(1)
+    setError('')
+  }
+
+  // Open create form
   function openCreateForm() {
     setEditingStudent(null)
 
@@ -136,6 +266,7 @@ function StudentsPage() {
     setShowForm(true)
   }
 
+  // Open edit form
   function openEditForm(student) {
     setEditingStudent(student)
 
@@ -151,12 +282,16 @@ function StudentsPage() {
     setShowForm(true)
   }
 
+  // Close form
   function closeForm() {
+    if (saving) return
+
     setShowForm(false)
     setEditingStudent(null)
     setError('')
   }
 
+  // Handle form inputs
   function handleInputChange(e) {
     const { name, value } = e.target
 
@@ -166,6 +301,7 @@ function StudentsPage() {
     }))
   }
 
+  // Create or update student
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
@@ -221,9 +357,11 @@ function StudentsPage() {
       })
 
       if (!response.ok) {
-        const result = await response.json().catch(() => null)
         throw new Error(
-          result?.message || 'Failed to create student.'
+          await getErrorMessage(
+            response,
+            'Failed to create student.'
+          )
         )
       }
 
@@ -231,6 +369,8 @@ function StudentsPage() {
       setPageNumber(1)
       setActiveSearch('')
       setSearch('')
+      setSelectedSchoolId('')
+      setSelectedCourseId('')
       setRefreshKey((previous) => previous + 1)
     } catch (err) {
       setError(err.message || 'Something went wrong.')
@@ -258,9 +398,11 @@ function StudentsPage() {
       )
 
       if (!response.ok) {
-        const result = await response.json().catch(() => null)
         throw new Error(
-          result?.message || 'Failed to update student.'
+          await getErrorMessage(
+            response,
+            'Failed to update student.'
+          )
         )
       }
 
@@ -273,6 +415,7 @@ function StudentsPage() {
     }
   }
 
+  // Delete student
   async function handleDelete(student) {
     const confirmed = window.confirm(
       `Are you sure you want to delete ${student.fullName}?`
@@ -294,9 +437,11 @@ function StudentsPage() {
       )
 
       if (!response.ok) {
-        const result = await response.json().catch(() => null)
         throw new Error(
-          result?.message || 'Failed to delete student.'
+          await getErrorMessage(
+            response,
+            'Failed to delete student.'
+          )
         )
       }
 
@@ -310,6 +455,7 @@ function StudentsPage() {
     }
   }
 
+  // Pagination
   function goToPreviousPage() {
     setPageNumber((previous) => Math.max(previous - 1, 1))
   }
@@ -319,6 +465,15 @@ function StudentsPage() {
       Math.min(previous + 1, totalPages)
     )
   }
+
+  // Keep course dropdown options relevant to the selected school
+  const availableFilterCourses = isPresident
+    ? courses.filter(
+        (course) =>
+          !selectedSchoolId ||
+          Number(course.schoolId) === Number(selectedSchoolId)
+      )
+    : courses
 
   if (loading) {
     return (
@@ -341,14 +496,8 @@ function StudentsPage() {
         </div>
 
         <div className="students-header-actions">
-          <span className="students-count">
-            {activeSearch
-              ? filteredStudents.length
-              : totalCount}{' '}
-            students
-          </span>
-
           <button
+            type="button"
             className="students-add-button"
             onClick={openCreateForm}
           >
@@ -361,6 +510,7 @@ function StudentsPage() {
         <p className="students-error">{error}</p>
       )}
 
+      {/* Search and Filters */}
       <form
         className="students-search-form"
         onSubmit={handleSearch}
@@ -379,6 +529,46 @@ function StudentsPage() {
         >
           Search
         </button>
+
+        <button
+          type="button"
+          className="students-search-button"
+          onClick={handleClearSearch}
+        >
+          Clear
+        </button>
+
+        {isPresident && (
+          <select
+            className="students-search"
+            value={selectedSchoolId}
+            onChange={handleSchoolFilterChange}
+          >
+            <option value="">All Schools</option>
+
+            {schools.map((school) => (
+              <option key={school.id} value={school.id}>
+                {school.name}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <select
+          className="students-search"
+          value={selectedCourseId}
+          onChange={handleCourseFilterChange}
+        >
+          <option value="">All Courses</option>
+
+          {availableFilterCourses.map((course) => (
+            <option key={course.id} value={course.id}>
+              {course.name} ({course.code})
+            </option>
+          ))}
+        </select>
+
+        
       </form>
 
       <div className="students-table-wrapper">
@@ -395,7 +585,7 @@ function StudentsPage() {
           </thead>
 
           <tbody>
-            {filteredStudents.map((student) => {
+            {students.map((student) => {
               const enrollments = (student.enrollments || []).filter(
                 (enrollment) =>
                   [0, 3, 4].includes(Number(enrollment.status))
@@ -411,6 +601,7 @@ function StudentsPage() {
 
                     <td>
                       <button
+                        type="button"
                         className="student-details-button"
                         onClick={() =>
                           setSelectedStudentId(
@@ -429,6 +620,7 @@ function StudentsPage() {
                     <td>
                       <div className="students-actions">
                         <button
+                          type="button"
                           className="students-edit-button"
                           onClick={() => openEditForm(student)}
                         >
@@ -436,6 +628,7 @@ function StudentsPage() {
                         </button>
 
                         <button
+                          type="button"
                           className="students-delete-button"
                           onClick={() => handleDelete(student)}
                         >
@@ -484,7 +677,7 @@ function StudentsPage() {
               )
             })}
 
-            {filteredStudents.length === 0 && (
+            {students.length === 0 && (
               <tr>
                 <td colSpan="6">No students found.</td>
               </tr>
@@ -493,29 +686,31 @@ function StudentsPage() {
         </table>
       </div>
 
-      {!activeSearch && totalPages > 1 && (
-        <div className="students-pagination">
-          <button
-            className="students-pagination-button"
-            onClick={goToPreviousPage}
-            disabled={pageNumber === 1}
-          >
-            Previous
-          </button>
+      <div className="students-pagination">
+        <button
+          type="button"
+          className="students-pagination-button"
+          onClick={goToPreviousPage}
+          disabled={pageNumber === 1 || loading}
+        >
+          Previous
+        </button>
 
-          <span className="students-page-info">
-            Page {pageNumber} of {totalPages}
-          </span>
+        <span className="students-page-info">
+          Page {pageNumber} of {Math.max(totalPages, 1)}
+          {' | '}
+          {totalCount} students
+        </span>
 
-          <button
-            className="students-pagination-button"
-            onClick={goToNextPage}
-            disabled={pageNumber === totalPages}
-          >
-            Next
-          </button>
-        </div>
-      )}
+        <button
+          type="button"
+          className="students-pagination-button"
+          onClick={goToNextPage}
+          disabled={pageNumber >= totalPages || loading}
+        >
+          Next
+        </button>
+      </div>
 
       {showForm && (
         <div className="students-modal-overlay">
@@ -529,6 +724,7 @@ function StudentsPage() {
                 type="button"
                 className="students-close-button"
                 onClick={closeForm}
+                disabled={saving}
               >
                 ×
               </button>

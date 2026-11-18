@@ -58,7 +58,7 @@ namespace UMS.Application.Services
         }
 
 
-        public async Task<PagedResult<ProfessorDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize)
+        public async Task<PagedResultDto<ProfessorDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize, string? searchTerm = null, int? schoolId = null)
         {
             pageNumber = Math.Max(1, pageNumber);
             pageSize = Math.Clamp(pageSize, 1, 100);
@@ -73,10 +73,23 @@ namespace UMS.Application.Services
 
             if (user.Role == UserRole.Director)
             {
-                var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+                var directorSchoolId = await GetDirectorSchoolIdAsync(user.Id);
 
                 professors = professors.Where(
-                    p => p.SchoolId == schoolId
+                    p => p.SchoolId == directorSchoolId
+                );
+            }
+            else if (schoolId.HasValue)
+            {
+                professors = professors.Where(
+                    p => p.SchoolId == schoolId.Value
+                );
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                professors = professors.Where(
+                    p => p.User.FullName.Contains(searchTerm)
                 );
             }
 
@@ -99,7 +112,7 @@ namespace UMS.Application.Services
                 CourseCount = p.Courses.Count
             }).ToList();
 
-            return new PagedResult<ProfessorDto>
+            return new PagedResultDto<ProfessorDto>
             {
                 Items = items,
                 PageNumber = pageNumber,

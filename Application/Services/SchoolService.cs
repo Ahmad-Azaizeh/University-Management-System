@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Text;
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Schools;
 using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
@@ -40,6 +42,41 @@ namespace UMS.Application.Services
                 Name = s.Name,
                 DirectorUserId = s.DirectorUserId
             });
+        }
+
+
+        public async Task<PagedResultDto<SchoolDto>> GetPagedAsync(int pageNumber, int pageSize, string? searchTerm = null)
+        {
+            if (pageNumber < 1)
+                throw new ArgumentException("Page number must be greater than 0.");
+
+            if (pageSize < 1)
+                throw new ArgumentException("Page size must be greater than 0.");
+
+            Expression<Func<School, bool>>? filter = null;
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                filter = s => s.Name.Contains(searchTerm);
+            }
+
+            var (schools, totalCount) = await _schoolRepository.GetPagedAsync(
+                pageNumber, pageSize, filter);
+
+            var items = schools.Select(s => new SchoolDto
+            {
+                Id = s.Id,
+                Name = s.Name,
+                DirectorUserId = s.DirectorUserId
+            });
+
+            return new PagedResultDto<SchoolDto>
+            {
+                Items = items,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                TotalCount = totalCount
+            };
         }
 
 

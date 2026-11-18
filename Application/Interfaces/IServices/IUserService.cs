@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Users;
 
 namespace UMS.Application.Interfaces.Services
@@ -8,6 +9,7 @@ namespace UMS.Application.Interfaces.Services
     public interface IUserService
     {
         Task<IEnumerable<UserDto>> GetAllAsync();
+        Task<PagedResultDto<UserDto>> GetDirectorsPagedAsync(int pageNumber, int pageSize, string? searchTerm = null);
         Task<UserDto?> GetByIdAsync(int id);
         Task<UserDto> CreateAsync(CreateUserDto dto, int currentUserId);
         Task<bool> UpdateAsync(int id, UpdateUserDto dto, int currentUserId);

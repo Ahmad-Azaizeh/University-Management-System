@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Users;
 using UMS.Application.Interfaces.Services;
 
@@ -26,6 +27,21 @@ namespace University_Management_System.Controllers
         {
             var users = await _userService.GetAllAsync();
             return Ok(users);
+        }
+
+
+        [Authorize(Policy = "PasswordChanged")]
+        [Authorize(Roles = "President")]
+        [HttpGet("directors")]
+        public async Task<ActionResult<PagedResultDto<UserDto>>> GetDirectors(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? searchTerm = null)
+        {
+            var directors = await _userService.GetDirectorsPagedAsync(
+                pageNumber, pageSize, searchTerm);
+
+            return Ok(directors);
         }
 
 

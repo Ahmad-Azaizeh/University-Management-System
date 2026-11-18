@@ -23,27 +23,22 @@ namespace University_Management_System.Controllers
         [Authorize(Roles = "President,Director,Professor,Student")]
         [HttpGet]
         public async Task<IActionResult> GetAll(
-            [FromQuery] bool paginated = true,
             [FromQuery] int pageNumber = 1,
-            [FromQuery] int pageSize = 10)
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? searchTerm = null,
+            [FromQuery] int? schoolId = null)
         {
             try
             {
-                if (!paginated)
-                {
-                    var courses = await _courseService.GetAllAsync(
-                        GetCurrentUserId());
-
-                    return Ok(courses);
-                }
-
-                var pagedCourses = await _courseService.GetAllPagedAsync(
+                var courses = await _courseService.GetAllPagedAsync(
                     GetCurrentUserId(),
                     pageNumber,
-                    pageSize
+                    pageSize,
+                    searchTerm,
+                    schoolId
                 );
 
-                return Ok(pagedCourses);
+                return Ok(courses);
             }
             catch (UnauthorizedAccessException)
             {

@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 
+//Common
 import Landing from './Pages/Common Pages/Landing'
 import Login from './Pages/Common Pages/Login'
 import ChangePassword from './Pages/Common Pages/ChangePassword'
@@ -18,14 +19,16 @@ import StudentsPage from './Pages/Shared Pages/StudentsPage'
 import CoursesPage from './Pages/Shared Pages/CoursesPage'
 import ProfessorsPage from './Pages/Shared Pages/ProfessorsPage'
 import EnrollmentsPage from './Pages/Shared Pages/EnrollmentPage'
-import SchoolsPage from './Pages/Shared Pages/SchoolsPage'
-import DirectorsPage from './Pages/Shared Pages/DirectorsPage'
 
 // Student
 import StudentDashboard from './Pages/Student Pages/StudentDashboard'
 import StudentCoursesPage from './Pages/Student Pages/StudentCoursesPage'
 import StudentEnrollmentsPage from './Pages/Student Pages/StudentEnrollmentPage'
 import StudentGradesPage from './Pages/Student Pages/StudentGradesPage'
+
+//President
+import SchoolsPage from './Pages/President Pages/SchoolsPage'
+import DirectorsPage from './Pages/President Pages/DirectorsPage'
 
 
 

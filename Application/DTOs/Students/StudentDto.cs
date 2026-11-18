@@ -23,6 +23,7 @@ namespace UMS.Application.DTOs.Students
         public int CourseId { get; set; }
         public string CourseName { get; set; } = string.Empty;
         public string CourseCode { get; set; } = string.Empty;
+        public string ProfessorName { get; set; } = string.Empty;
         public decimal? Grade { get; set; }
         public DateTime EnrollmentDate { get; set; }
         public EnrollmentStatus Status { get; set; }

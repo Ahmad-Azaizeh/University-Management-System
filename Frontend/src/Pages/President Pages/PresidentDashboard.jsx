@@ -1,14 +1,44 @@
+
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const API = 'https://localhost:7245/api'
+const PAGE_SIZE = 100
+
+async function fetchAllPages(endpoint, headers, signal) {
+  let pageNumber = 1
+  let totalPages = 1
+  const allItems = []
+
+  while (pageNumber <= totalPages) {
+    const response = await fetch(
+      `${API}/${endpoint}?pageNumber=${pageNumber}&pageSize=${PAGE_SIZE}`,
+      { headers, signal }
+    )
+
+    if (!response.ok) {
+      throw new Error(`Failed to load ${endpoint}.`)
+    }
+
+    const data = await response.json()
+
+    allItems.push(...(data.items ?? []))
+
+    totalPages = data.totalPages ??
+      Math.ceil((data.totalCount ?? 0) / PAGE_SIZE)
+
+    pageNumber++
+  }
+
+  return allItems
+}
 
 function PresidentDashboard() {
   const { user } = useAuth()
   const token = user?.token
 
   const [schools, setSchools] = useState([])
-  const [users, setUsers] = useState([])
+  const [directors, setDirectors] = useState([])
   const [students, setStudents] = useState([])
   const [professors, setProfessors] = useState([])
   const [courses, setCourses] = useState([])
@@ -20,56 +50,55 @@ function PresidentDashboard() {
   useEffect(() => {
     if (!token) return
 
+    const controller = new AbortController()
+
     async function loadDashboard() {
       try {
         const headers = {
           Authorization: `Bearer ${token}`,
         }
 
-        const endpoints = [
-          'Schools',
-          'Users',
-          'Students?paginated=false',
-          'Professors?paginated=false',
-          'Courses?paginated=false',
-          'Enrollments?paginated=false',
-        ]
+        const [
+          schoolsData,
+          directorsData,
+          studentsData,
+          professorsData,
+          coursesData,
+          enrollmentsData,
+        ] = await Promise.all([
+          fetchAllPages('Schools', headers, controller.signal),
+          fetchAllPages('Users/directors', headers, controller.signal),
+          fetchAllPages('Students', headers, controller.signal),
+          fetchAllPages('Professors', headers, controller.signal),
+          fetchAllPages('Courses', headers, controller.signal),
+          fetchAllPages('Enrollments', headers, controller.signal),
+        ])
 
-        const responses = await Promise.all(
-          endpoints.map((endpoint) =>
-            fetch(`${API}/${endpoint}`, { headers })
-          )
-        )
-
-        if (responses.some((response) => !response.ok)) {
-          throw new Error('Failed to load dashboard data.')
-        }
-
-        const data = await Promise.all(
-          responses.map((response) => response.json())
-        )
-
-        setSchools(data[0])
-        setUsers(data[1])
-        setStudents(data[2])
-        setProfessors(data[3])
-        setCourses(data[4])
-        setEnrollments(data[5])
+        setSchools(schoolsData)
+        setDirectors(directorsData)
+        setStudents(studentsData)
+        setProfessors(professorsData)
+        setCourses(coursesData)
+        setEnrollments(enrollmentsData)
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
+        if (!controller.signal.aborted) {
+          setError(err.message || 'Something went wrong.')
+        }
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
       }
     }
 
     loadDashboard()
+
+    return () => controller.abort()
   }, [token])
 
   if (loading) return <p>Loading dashboard...</p>
 
   if (error) return <p className="error-message">{error}</p>
-
-  const directors = users.filter((u) => u.role === 2)
 
   const gradedEnrollments = enrollments.filter(
     (enrollment) => enrollment.grade !== null
@@ -134,8 +163,8 @@ function PresidentDashboard() {
   }
 
   function getDirectorName(directorUserId) {
-    const director = users.find(
-      (u) => u.id === directorUserId
+    const director = directors.find(
+      (d) => d.id === directorUserId
     )
 
     return director?.fullName || 'Not found'

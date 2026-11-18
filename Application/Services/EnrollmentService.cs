@@ -1,11 +1,12 @@
 ﻿
+using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
 using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Enrollments;
 using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
 using UMS.Domain.Entities;
 using UMS.Domain.Enums;
-using Microsoft.EntityFrameworkCore;
 
 namespace UMS.Application.Services
 {
@@ -77,7 +78,14 @@ namespace UMS.Application.Services
         }
 
 
-        public async Task<PagedResult<EnrollmentDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize)
+        public async Task<PagedResultDto<EnrollmentDto>> GetAllPagedAsync(
+            int currentUserId,
+            int pageNumber,
+            int pageSize,
+            string? searchTerm = null,
+            EnrollmentStatus? status = null,
+            int? courseId = null,
+            int? schoolId = null)
         {
             pageNumber = Math.Max(1, pageNumber);
             pageSize = Math.Clamp(pageSize, 1, 100);
@@ -91,18 +99,42 @@ namespace UMS.Application.Services
 
             if (user.Role == UserRole.Director)
             {
-                var schoolId = await GetDirectorSchoolIdAsync(user.Id);
+                var directorSchoolId = await GetDirectorSchoolIdAsync(user.Id);
 
                 var students = await _studentRepository.GetAllAsync();
 
                 var studentIds = students
-                    .Where(s => s.SchoolId == schoolId)
+                    .Where(s => s.SchoolId == directorSchoolId)
                     .Select(s => s.Id)
                     .ToHashSet();
 
                 enrollments = enrollments.Where(e =>
                     studentIds.Contains(e.StudentId) &&
-                    e.Course.SchoolId == schoolId);
+                    e.Course.SchoolId == directorSchoolId);
+            }
+            else if (schoolId.HasValue)
+            {
+                enrollments = enrollments.Where(e =>
+                    e.Course.SchoolId == schoolId.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                enrollments = enrollments.Where(e =>
+                    e.Student.User.FullName.Contains(searchTerm) ||
+                    e.Student.StudentNumber.Contains(searchTerm));
+            }
+
+            if (status.HasValue)
+            {
+                enrollments = enrollments.Where(e =>
+                    e.Status == status.Value);
+            }
+
+            if (courseId.HasValue)
+            {
+                enrollments = enrollments.Where(e =>
+                    e.CourseId == courseId.Value);
             }
 
             var totalCount = await enrollments.CountAsync();
@@ -129,7 +161,7 @@ namespace UMS.Application.Services
                 CompletedAt = e.CompletedAt
             }).ToList();
 
-            return new PagedResult<EnrollmentDto>
+            return new PagedResultDto<EnrollmentDto>
             {
                 Items = items,
                 PageNumber = pageNumber,
@@ -450,7 +482,7 @@ namespace UMS.Application.Services
             if (existingEnrollment != null)
             {
                 throw new InvalidOperationException(
-                    "You already have an active or completed enrollment for this course.");
+                    "You already enrolled this course.");
             }
 
             
@@ -497,8 +529,11 @@ namespace UMS.Application.Services
             };
         }
 
-        public async Task<IEnumerable<EnrollmentDto>> GetMyEnrollmentsAsync(
-            int currentUserId)
+        public async Task<PagedResultDto<EnrollmentDto>> GetMyEnrollmentsAsync(
+            int currentUserId,
+            int pageNumber,
+            int pageSize,
+            string? searchTerm)
         {
             var user = await _userRepository.GetByIdAsync(currentUserId);
 
@@ -512,15 +547,32 @@ namespace UMS.Application.Services
             if (student == null)
                 throw new UnauthorizedAccessException("Student profile not found.");
 
-            var enrollments = await _enrollmentRepository.GetAllAsync(
+            pageNumber = Math.Max(1, pageNumber);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+
+            searchTerm = searchTerm?.Trim();
+
+            Expression<Func<Enrollment, bool>> filter = e =>
+                e.StudentId == student.Id &&
+                (string.IsNullOrEmpty(searchTerm) ||
+                 e.Course.Name.Contains(searchTerm) ||
+                 e.Course.Code.Contains(searchTerm));
+
+            var (items, totalCount) = await _enrollmentRepository.GetPagedAsync(
+                pageNumber,
+                pageSize,
+                filter,
                 "Student.User",
                 "Course"
             );
 
-            return enrollments
-                .Where(e => e.StudentId == student.Id)
-                .Select(MapEnrollmentToDto)
-                .ToList();
+            return new PagedResultDto<EnrollmentDto>
+            {
+                Items = items.Select(MapEnrollmentToDto).ToList(),
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                TotalCount = totalCount
+            };
         }
 
         public async Task<bool> ApproveRequestAsync(

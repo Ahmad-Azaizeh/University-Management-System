@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Schools;
 using UMS.Application.Interfaces.Services;
 
@@ -21,9 +22,14 @@ namespace University_Management_System.Controllers
 
         [Authorize(Roles = "President")]
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<SchoolDto>>> GetAll()
+        public async Task<ActionResult<PagedResultDto<SchoolDto>>> GetAll(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? searchTerm = null)
         {
-            var schools = await _schoolService.GetAllAsync();
+            var schools = await _schoolService.GetPagedAsync(
+                pageNumber, pageSize, searchTerm);
+
             return Ok(schools);
         }
 

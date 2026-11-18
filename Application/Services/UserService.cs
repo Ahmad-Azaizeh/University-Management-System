@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Text;
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Users;
 using UMS.Application.Interfaces;
 using UMS.Application.Interfaces.Services;
@@ -43,6 +45,45 @@ namespace UMS.Application.Services
                 Role = u.Role,
                 MustChangePassword = u.MustChangePassword
             });
+        }
+
+        public async Task<PagedResultDto<UserDto>> GetDirectorsPagedAsync(int pageNumber, int pageSize, string? searchTerm = null)
+        {
+            if (pageNumber < 1)
+                throw new ArgumentException("Page number must be greater than 0.");
+
+            if (pageSize < 1)
+                throw new ArgumentException("Page size must be greater than 0.");
+
+            Expression<Func<User, bool>> filter = u =>
+                u.Role == UserRole.Director;
+
+            if (!string.IsNullOrWhiteSpace(searchTerm))
+            {
+                filter = u =>
+                    u.Role == UserRole.Director &&
+                    u.FullName.Contains(searchTerm);
+            }
+
+            var (directors, totalCount) = await _userRepository.GetPagedAsync(
+                pageNumber, pageSize, filter);
+
+            var items = directors.Select(u => new UserDto
+            {
+                Id = u.Id,
+                FullName = u.FullName,
+                LoginId = u.LoginId,
+                Role = u.Role,
+                MustChangePassword = u.MustChangePassword
+            });
+
+            return new PagedResultDto<UserDto>
+            {
+                Items = items,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
+                TotalCount = totalCount
+            };
         }
 
         public async Task<UserDto?> GetByIdAsync(int id)

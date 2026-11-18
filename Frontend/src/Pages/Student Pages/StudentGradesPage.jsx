@@ -124,16 +124,14 @@ function StudentGradesPage() {
                         : `${enrollment.grade}%`}
                     </td>
                     <td>
-                      <span
-                        className={
-                          enrollment.grade === null
-                            ? 'student-grade-pending'
-                            : 'student-grade-completed'
-                        }
-                      >
-                        {enrollment.grade === null
-                          ? 'Not Graded'
-                          : 'Graded'}
+                      <span className={`enrollment-status enrollment-status-${Number(enrollment.status)}`}>
+                        {{
+                          0: 'Approved',
+                          1: 'Pending',
+                          2: 'Declined',
+                          3: 'Completed',
+                          4: 'Failed',
+                        }[Number(enrollment.status)] ?? 'Unknown'}
                       </span>
                     </td>
                   </tr>

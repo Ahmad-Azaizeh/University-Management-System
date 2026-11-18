@@ -1,9 +1,11 @@
 ﻿
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using UMS.Application.DTOs.Common;
 using UMS.Application.DTOs.Enrollments;
 using UMS.Application.Interfaces.Services;
+using UMS.Domain.Enums;
 
 namespace University_Management_System.Controllers
 {
@@ -23,24 +25,27 @@ namespace University_Management_System.Controllers
 
         [Authorize(Roles = "President,Director")]
         [HttpGet]
-        public async Task<IActionResult> GetAll([FromQuery] bool paginated = true, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
+        public async Task<IActionResult> GetAll(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? searchTerm = null,
+            [FromQuery] EnrollmentStatus? status = null,
+            [FromQuery] int? courseId = null,
+            [FromQuery] int? schoolId = null)
         {
             try
             {
-                if (!paginated)
-                {
-                    var enrollments = await _enrollmentService.GetAllAsync(GetCurrentUserId());
-
-                    return Ok(enrollments);
-                }
-
-                var pagedEnrollments = await _enrollmentService.GetAllPagedAsync(
+                var enrollments = await _enrollmentService.GetAllPagedAsync(
                     GetCurrentUserId(),
                     pageNumber,
-                    pageSize
+                    pageSize,
+                    searchTerm,
+                    status,
+                    courseId,
+                    schoolId
                 );
 
-                return Ok(pagedEnrollments);
+                return Ok(enrollments);
             }
             catch (UnauthorizedAccessException)
             {
@@ -180,6 +185,10 @@ namespace University_Management_System.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (UnauthorizedAccessException)
             {
                 return Forbid();
@@ -188,12 +197,18 @@ namespace University_Management_System.Controllers
 
         [Authorize(Roles = "Student")]
         [HttpGet("me")]
-        public async Task<ActionResult<IEnumerable<EnrollmentDto>>> GetMyEnrollments()
+        public async Task<ActionResult<PagedResultDto<EnrollmentDto>>> GetMyEnrollments(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 10,
+            [FromQuery] string? searchTerm = null)
         {
             try
             {
                 var enrollments = await _enrollmentService.GetMyEnrollmentsAsync(
-                    GetCurrentUserId());
+                    GetCurrentUserId(),
+                    pageNumber,
+                    pageSize,
+                    searchTerm);
 
                 return Ok(enrollments);
             }

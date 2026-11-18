@@ -1,7 +1,48 @@
+
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const API = 'https://localhost:7245/api'
+const LOOKUP_PAGE_SIZE = 100
+
+function getAuthHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+async function fetchAllPages(endpoint, token, signal) {
+  let allItems = []
+  let currentPage = 1
+
+  while (true) {
+    const params = new URLSearchParams({
+      pageNumber: String(currentPage),
+      pageSize: String(LOOKUP_PAGE_SIZE),
+    })
+
+    const response = await fetch(`${API}/${endpoint}?${params}`, {
+      headers: getAuthHeaders(token),
+      signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to load ${endpoint.toLowerCase()}.`)
+    }
+
+    const data = await response.json()
+
+    allItems = [...allItems, ...(data.items || [])]
+
+    if (currentPage >= (data.totalPages || 1)) {
+      break
+    }
+
+    currentPage += 1
+  }
+
+  return allItems
+}
 
 function DirectorDashboard() {
   const { user } = useAuth()
@@ -18,43 +59,20 @@ function DirectorDashboard() {
   useEffect(() => {
     if (!token) return
 
+    const controller = new AbortController()
+
     async function loadDashboard() {
       try {
-        const headers = {
-          Authorization: `Bearer ${token}`,
-        }
-
-        const [
-          studentsResponse,
-          professorsResponse,
-          coursesResponse,
-          enrollmentsResponse,
-        ] = await Promise.all([
-          fetch(`${API}/Students?paginated=false`, { headers }),
-          fetch(`${API}/Professors?paginated=false`, { headers }),
-          fetch(`${API}/Courses?paginated=false`, { headers }),
-          fetch(`${API}/Enrollments?paginated=false`, { headers }),
-        ])
-
-        if (
-          !studentsResponse.ok ||
-          !professorsResponse.ok ||
-          !coursesResponse.ok ||
-          !enrollmentsResponse.ok
-        ) {
-          throw new Error('Failed to load dashboard data.')
-        }
-
         const [
           studentsData,
           professorsData,
           coursesData,
           enrollmentsData,
         ] = await Promise.all([
-          studentsResponse.json(),
-          professorsResponse.json(),
-          coursesResponse.json(),
-          enrollmentsResponse.json(),
+          fetchAllPages('Students', token, controller.signal),
+          fetchAllPages('Professors', token, controller.signal),
+          fetchAllPages('Courses', token, controller.signal),
+          fetchAllPages('Enrollments', token, controller.signal),
         ])
 
         setStudents(studentsData)
@@ -62,13 +80,19 @@ function DirectorDashboard() {
         setCourses(coursesData)
         setEnrollments(enrollmentsData)
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Something went wrong.')
+        }
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
       }
     }
 
     loadDashboard()
+
+    return () => controller.abort()
   }, [token])
 
   if (loading) return <p>Loading dashboard...</p>
@@ -97,33 +121,64 @@ function DirectorDashboard() {
         ).toFixed(2)
       : 'N/A'
 
-  function getCourseStats(courseId) {
-    const courseEnrollments = enrollments.filter(
-      (enrollment) => enrollment.courseId === courseId
-    )
+  const enrollmentStatuses = [
+    { label: 'Approved', value: 0 },
+    { label: 'Pending', value: 1 },
+    { label: 'Declined', value: 2 },
+    { label: 'Completed', value: 3 },
+    { label: 'Failed', value: 4 },
+  ]
 
-    const graded = courseEnrollments.filter(
-      (enrollment) => enrollment.grade !== null
-    )
-
-    const average =
-      graded.length > 0
-        ? (
-            graded.reduce(
-              (total, enrollment) => total + Number(enrollment.grade),
-              0
-            ) / graded.length
-          ).toFixed(2)
-        : 'N/A'
-
-    return {
-      studentCount: courseEnrollments.length,
-      ungradedCount: courseEnrollments.filter(
-        (enrollment) => enrollment.grade === null
-      ).length,
-      average,
-    }
+  function getPercentage(count) {
+    return totalEnrollments > 0
+      ? `${((count / totalEnrollments) * 100).toFixed(1)}%`
+      : '0%'
   }
+
+  const academicStats = [
+    {
+      label: 'Graded',
+      count: gradedEnrollments.length,
+    },
+    {
+      label: 'Ungraded',
+      count: ungradedEnrollments,
+    },
+    ...enrollmentStatuses.map((status) => ({
+      label: status.label,
+      count: enrollments.filter(
+        (enrollment) => Number(enrollment.status) === status.value
+      ).length,
+    })),
+  ]
+
+  const professorStats = courses.reduce((stats, course) => {
+    const professorName = course.professorName || 'Not assigned'
+
+    if (!stats[professorName]) {
+      stats[professorName] = {
+        name: professorName,
+        courseCount: 0,
+        enrollmentCount: 0,
+        ungradedCount: 0,
+      }
+    }
+
+    const courseEnrollments = enrollments.filter(
+      (enrollment) =>
+        Number(enrollment.courseId) === Number(course.id)
+    )
+
+    stats[professorName].courseCount += 1
+    stats[professorName].enrollmentCount += courseEnrollments.length
+    stats[professorName].ungradedCount += courseEnrollments.filter(
+      (enrollment) => enrollment.grade === null
+    ).length
+
+    return stats
+  }, {})
+
+  const professorOverview = Object.values(professorStats)
 
   return (
     <section className="director-dashboard">
@@ -165,42 +220,59 @@ function DirectorDashboard() {
       </div>
 
       <div className="director-dashboard-courses">
-        <h3>Course Overview</h3>
+        <h3>Academic Performance</h3>
 
         <div className="director-dashboard-table-wrapper">
           <table className="director-dashboard-table">
             <thead>
               <tr>
-                <th>Course</th>
-                <th>Professor</th>
-                <th>Students</th>
-                <th>Ungraded</th>
-                <th>Average Grade</th>
+                <th>Metric</th>
+                <th>Enrollments</th>
+                <th>Percentage</th>
               </tr>
             </thead>
 
             <tbody>
-              {courses.length === 0 ? (
+              {academicStats.map((stat) => (
+                <tr key={stat.label}>
+                  <td>{stat.label}</td>
+                  <td>{stat.count}</td>
+                  <td>{getPercentage(stat.count)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="director-dashboard-courses">
+        <h3>Professor Overview</h3>
+
+        <div className="director-dashboard-table-wrapper">
+          <table className="director-dashboard-table">
+            <thead>
+              <tr>
+                <th>Professor</th>
+                <th>Assigned Courses</th>
+                <th>Enrollments</th>
+                <th>Ungraded</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {professorOverview.length === 0 ? (
                 <tr>
-                  <td colSpan="5">No courses found.</td>
+                  <td colSpan="4">No professor data found.</td>
                 </tr>
               ) : (
-                courses.map((course) => {
-                  const stats = getCourseStats(course.id)
-
-                  return (
-                    <tr key={course.id}>
-                      <td>
-                        <strong>{course.name}</strong>
-                        <span>{course.code}</span>
-                      </td>
-                      <td>{course.professorName || 'Not assigned'}</td>
-                      <td>{stats.studentCount}</td>
-                      <td>{stats.ungradedCount}</td>
-                      <td>{stats.average}</td>
-                    </tr>
-                  )
-                })
+                professorOverview.map((professor) => (
+                  <tr key={professor.name}>
+                    <td>{professor.name}</td>
+                    <td>{professor.courseCount}</td>
+                    <td>{professor.enrollmentCount}</td>
+                    <td>{professor.ungradedCount}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>

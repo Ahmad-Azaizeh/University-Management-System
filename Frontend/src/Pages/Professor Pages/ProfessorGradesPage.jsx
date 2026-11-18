@@ -1,7 +1,48 @@
+
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const API = 'https://localhost:7245/api'
+const LOOKUP_PAGE_SIZE = 100
+
+function getAuthHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+async function fetchAllPages(endpoint, token, signal) {
+  let allItems = []
+  let currentPage = 1
+
+  while (true) {
+    const params = new URLSearchParams({
+      pageNumber: String(currentPage),
+      pageSize: String(LOOKUP_PAGE_SIZE),
+    })
+
+    const response = await fetch(`${API}/${endpoint}?${params}`, {
+      headers: getAuthHeaders(token),
+      signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to load ${endpoint.toLowerCase()}.`)
+    }
+
+    const data = await response.json()
+
+    allItems = [...allItems, ...(data.items || [])]
+
+    if (currentPage >= (data.totalPages || 1)) {
+      break
+    }
+
+    currentPage += 1
+  }
+
+  return allItems
+}
 
 function formatDate(date) {
   if (!date) return '—'
@@ -29,45 +70,46 @@ function ProfessorGradesPage() {
   useEffect(() => {
     if (!token) return
 
+    const controller = new AbortController()
+
     async function loadCourses() {
       try {
-        const response = await fetch(
-          `${API}/Courses?paginated=false`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
+        const data = await fetchAllPages(
+          'Courses',
+          token,
+          controller.signal
         )
 
-        if (!response.ok) {
-          throw new Error('Failed to load courses.')
-        }
-
-        const data = await response.json()
         setCourses(data)
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Something went wrong.')
+        }
       } finally {
-        setLoadingCourses(false)
+        if (!controller.signal.aborted) {
+          setLoadingCourses(false)
+        }
       }
     }
 
     loadCourses()
+
+    return () => controller.abort()
   }, [token])
 
   // Load students when a course is selected
   useEffect(() => {
     if (!selectedCourseId || !token) return
 
+    const controller = new AbortController()
+
     async function loadStudents() {
       try {
         const response = await fetch(
           `${API}/Enrollments/course/${selectedCourseId}/students`,
           {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+            headers: getAuthHeaders(token),
+            signal: controller.signal,
           }
         )
 
@@ -87,13 +129,19 @@ function ProfessorGradesPage() {
 
         setGrades(initialGrades)
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Something went wrong.')
+        }
       } finally {
-        setLoadingStudents(false)
+        if (!controller.signal.aborted) {
+          setLoadingStudents(false)
+        }
       }
     }
 
     loadStudents()
+
+    return () => controller.abort()
   }, [selectedCourseId, token])
 
   // Update local grade input
@@ -130,7 +178,7 @@ function ProfessorGradesPage() {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
+            ...getAuthHeaders(token),
           },
           body: JSON.stringify({
             grade: gradeValue === '' ? null : Number(gradeValue),
@@ -150,9 +198,7 @@ function ProfessorGradesPage() {
       const refreshResponse = await fetch(
         `${API}/Enrollments/course/${selectedCourseId}/students`,
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: getAuthHeaders(token),
         }
       )
 

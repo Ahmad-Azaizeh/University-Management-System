@@ -4,7 +4,7 @@ using System.Text;
 
 namespace UMS.Application.DTOs.Common
 {
-    public class PagedResult<T>
+    public class PagedResultDto<T>
     {
         public IEnumerable<T> Items { get; set; } = new List<T>();
         public int PageNumber { get; set; }

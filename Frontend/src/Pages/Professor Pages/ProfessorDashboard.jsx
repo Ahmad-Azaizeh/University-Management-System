@@ -1,7 +1,48 @@
+
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 
 const API = 'https://localhost:7245/api'
+const LOOKUP_PAGE_SIZE = 100
+
+function getAuthHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+async function fetchAllPages(endpoint, token, signal) {
+  let allItems = []
+  let currentPage = 1
+
+  while (true) {
+    const params = new URLSearchParams({
+      pageNumber: String(currentPage),
+      pageSize: String(LOOKUP_PAGE_SIZE),
+    })
+
+    const response = await fetch(`${API}/${endpoint}?${params}`, {
+      headers: getAuthHeaders(token),
+      signal,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to load ${endpoint.toLowerCase()}.`)
+    }
+
+    const data = await response.json()
+
+    allItems = [...allItems, ...(data.items || [])]
+
+    if (currentPage >= (data.totalPages || 1)) {
+      break
+    }
+
+    currentPage += 1
+  }
+
+  return allItems
+}
 
 function ProfessorDashboard() {
   const { user } = useAuth()
@@ -15,23 +56,17 @@ function ProfessorDashboard() {
   useEffect(() => {
     if (!token) return
 
+    const controller = new AbortController()
+
     async function loadDashboard() {
       try {
         // Load professor's assigned courses
-        const coursesResponse = await fetch(
-          `${API}/Courses?paginated=false`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
+        const coursesData = await fetchAllPages(
+          'Courses',
+          token,
+          controller.signal
         )
 
-        if (!coursesResponse.ok) {
-          throw new Error('Failed to load courses.')
-        }
-
-        const coursesData = await coursesResponse.json()
         setCourses(coursesData)
 
         // Load students for each course
@@ -40,9 +75,8 @@ function ProfessorDashboard() {
             const response = await fetch(
               `${API}/Enrollments/course/${course.id}/students`,
               {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                },
+                headers: getAuthHeaders(token),
+                signal: controller.signal,
               }
             )
 
@@ -61,13 +95,19 @@ function ProfessorDashboard() {
 
         setCourseStudents(studentsData)
       } catch (err) {
-        setError(err.message || 'Something went wrong.')
+        if (err.name !== 'AbortError') {
+          setError(err.message || 'Something went wrong.')
+        }
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
       }
     }
 
     loadDashboard()
+
+    return () => controller.abort()
   }, [token])
 
   if (loading) {

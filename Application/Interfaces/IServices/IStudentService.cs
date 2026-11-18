@@ -11,7 +11,13 @@ namespace UMS.Application.Interfaces.Services
     {
         Task<IEnumerable<StudentDto>> GetAllAsync(int currentUserId);
 
-        Task<PagedResult<StudentDto>> GetAllPagedAsync(int currentUserId, int pageNumber, int pageSize);
+        Task<PagedResultDto<StudentDto>> GetAllPagedAsync(
+            int currentUserId,
+            int pageNumber,
+            int pageSize,
+            string? searchTerm = null,
+            int? schoolId = null,
+            int? courseId = null);
 
         Task<StudentDto?> GetByIdAsync(int id, int currentUserId);
         
