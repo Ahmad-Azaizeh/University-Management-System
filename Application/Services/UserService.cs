@@ -189,7 +189,7 @@ namespace UMS.Application.Services
 
                 if (employeeNumberExists)
                     throw new ArgumentException(
-                        "This EmployeeNumber is already in use.");
+                        "This Employee Number is already in use.");
             }
 
             var user = new User
@@ -404,7 +404,6 @@ namespace UMS.Application.Services
             if (director.Role != UserRole.Director)
                 return false;
 
-            // Directors cannot manage other Directors or Presidents.
             if (targetUser.Role == UserRole.Director ||
                 targetUser.Role == UserRole.President)
                 return false;

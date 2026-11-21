@@ -48,11 +48,8 @@ namespace UMS.Application.Services
 
         public async Task<PagedResultDto<SchoolDto>> GetPagedAsync(int pageNumber, int pageSize, string? searchTerm = null)
         {
-            if (pageNumber < 1)
-                throw new ArgumentException("Page number must be greater than 0.");
-
-            if (pageSize < 1)
-                throw new ArgumentException("Page size must be greater than 0.");
+            pageNumber = Math.Max(1, pageNumber);
+            pageSize = Math.Clamp(pageSize, 1, 100);
 
             Expression<Func<School, bool>>? filter = null;
 

@@ -33,7 +33,7 @@ namespace UMS.Application.Services
         public async Task<AuthResultDto> LoginAsync(LoginDto dto)
         {
             var user = await _userRepository.GetQueryable()
-                .FirstOrDefaultAsync(u => u.LoginId == dto.LoginId.Trim());
+                .SingleOrDefaultAsync(u => u.LoginId == dto.LoginId.Trim());
 
             if (user == null)
                 return null;

@@ -90,9 +90,7 @@ namespace UMS.Application.Services
                 SchoolName = c.School.Name,
                 ProfessorId = c.ProfessorId,
                 ProfessorName = c.Professor == null
-                    ? null
-                    : c.Professor.User.FullName,
-
+                    ? null : c.Professor.User.FullName,
                 StudentCount = _enrollmentRepository.GetQueryable()
                     .Count(e => e.CourseId == c.Id)
             }).ToListAsync();
